@@ -416,7 +416,7 @@ async function createProject(name: string): Promise<Project> {
   const clean = name.trim()
   if (!clean || clean.length > 80) fail(400, '项目名称须为 1 至 80 个字符')
   const now = new Date().toISOString()
-  const project: Project = { id: randomUUID(), name: clean, mainFile: 'main.tex', createdAt: now, updatedAt: now, sharing: 'personal', archived: false, tags: [] }
+  const project: Project = { id: randomUUID(), name: clean, mainFile: 'main.tex', createdAt: now, updatedAt: now, archived: false, tags: [] }
   await mkdir(projectDir(project.id), { recursive: true })
   await writeFile(path.join(projectDir(project.id), 'main.tex'), defaultTex(clean), 'utf8')
   await saveProject(project)
@@ -700,7 +700,9 @@ app.post<{ Body: { token: string } }>('/api/folders/import', async request => {
       if (Array.isArray(candidate.metadata?.tags)) {
         project.tags = [...new Set(candidate.metadata.tags.filter((tag): tag is string => typeof tag === 'string').map(tag => validTag(tag)))].slice(0, 20)
         const known = await readTags()
-        await writeTags([...known, ...project.tags].slice(0, 100))
+        const additions = project.tags.filter(tag => !known.includes(tag))
+        if (known.length + additions.length > 100) fail(413, '标签数量已达上限，无法恢复项目标签')
+        if (additions.length) await writeTags([...known, ...additions])
       }
       await saveProject(project)
       imported.push(project)
