@@ -23,16 +23,22 @@ export function GitCollaborationPanel({ projectId, state, onSwitch, onReload }: 
   const [preview, setPreview] = useState<{ path: string; content: string; diff?: string } | null>(null)
   const [busy, setBusy] = useState('')
   const [message, setMessage] = useState('')
+  const [messageError, setMessageError] = useState(false)
   const [author, setAuthor] = useState('')
 
   const load = async () => setBranches(await request<Branches>(`/api/projects/${projectId}/git/branches`))
-  useEffect(() => { void load().catch(error => setMessage(error.message)) }, [projectId, state.branch, state.remote])
+  useEffect(() => {
+    setBranches({ current: '', local: [], remote: [] })
+    setSelected(''); setBase(''); setView(null); setPreview(null)
+    setMessage(''); setMessageError(false)
+    void load().catch(error => { setMessageError(true); setMessage(error.message) })
+  }, [projectId, state.branch, state.remote])
   useEffect(() => { void request<{ name: string }>(`/api/projects/${projectId}/review/author`).then(data => setAuthor(data.name)).catch(() => {}) }, [projectId])
 
   const run = async (label: string, operation: () => Promise<void>) => {
-    setBusy(label); setMessage('')
+    setBusy(label); setMessage(''); setMessageError(false)
     try { await operation(); setMessage(previous => previous || `${label}成功`) }
-    catch (error) { setMessage(error instanceof Error ? error.message : String(error)) }
+    catch (error) { setMessageError(true); setMessage(error instanceof Error ? error.message : String(error)) }
     finally { setBusy('') }
   }
 
@@ -43,7 +49,8 @@ export function GitCollaborationPanel({ projectId, state, onSwitch, onReload }: 
   return <div className="panel-card git-collaboration">
     <GitBranch size={22} /><strong>私有仓库协作</strong>
     <p>每位协作者使用自己的 GitHub 身份。当前分支：{branches.current || '—'}</p>
-    <div className="git-collab-actions"><button disabled={!!busy || !state.remote} onClick={() => void run('连接 GitHub', async () => { await request('/api/git/connect', post({ url: state.remote })) })}>{busy === '连接 GitHub' ? <LoaderCircle size={13} className="spin" /> : null}连接 GitHub</button><button disabled={!!busy || !state.remote} onClick={() => void run('获取分支', async () => { await request(`/api/projects/${projectId}/git/fetch`, post()); await load() })}><RefreshCw size={13} />获取分支</button></div>
+    <div className="git-collab-actions"><button disabled={!!busy || !state.remote} onClick={() => void run('连接 GitHub', async () => { await request(`/api/projects/${projectId}/git/fetch`, post()); await load(); setMessage(`已连接 ${github ? `${github[1]}/${github[2]}` : 'GitHub'}，远程分支已更新`) })}>{busy === '连接 GitHub' ? <LoaderCircle size={13} className="spin" /> : null}连接 GitHub</button><button disabled={!!busy || !state.remote} onClick={() => void run('获取分支', async () => { await request(`/api/projects/${projectId}/git/fetch`, post()); await load() })}><RefreshCw size={13} />获取分支</button></div>
+    {message && <p className={`git-collab-message${messageError ? ' error' : ''}`} role={messageError ? 'alert' : 'status'}>{message}</p>}
     <label>切换分支<select value={selected} onChange={event => setSelected(event.target.value)}><option value="">选择本地或远程分支</option>{[...new Set([...branches.local, ...branches.remote])].filter(name => name !== branches.current).map(name => <option key={name} value={name}>{name}{branches.local.includes(name) ? '' : '（远程）'}</option>)}</select></label>
     <button disabled={!!busy || !selected} onClick={() => void run('切换分支', async () => { if (await onSwitch(selected, false)) { await load(); setSelected('') } else throw new Error('切换分支失败') })}>切换并编辑</button>
     <label>新分支名称<input value={newBranch} onChange={event => setNewBranch(event.target.value)} placeholder="feature/姓名/主题" /></label>
@@ -58,8 +65,7 @@ export function GitCollaborationPanel({ projectId, state, onSwitch, onReload }: 
     <div className="git-collab-divider" />
     <strong>审阅记录</strong><p>评论和建议存放在独立的 texloom-reviews 分支，仓库协作者均可读取；源码分支保持整洁。</p>
     <label>本机审阅署名<input value={author} maxLength={100} onChange={event => setAuthor(event.target.value)} placeholder="例如：Alice" /></label>
-    <button disabled={!!busy || !author.trim()} onClick={() => void run('保存署名', async () => { await request(`/api/projects/${projectId}/review/author`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: author.trim() }) }) })}>保存署名</button>
-    <button disabled={!!busy || !state.remote} onClick={() => void run('同步审阅', async () => { const result = await request<{ threads: number; pending: number }>(`/api/projects/${projectId}/git/review-sync`, post()); await onReload(); setMessage(`同步完成：${result.threads} 条审阅，待发送 ${result.pending} 条`) })}>同步审阅记录</button>
-    {message && <p className="git-collab-message" role="status">{message}</p>}
+    <div className="git-collab-actions"><button disabled={!!busy || !author.trim()} onClick={() => void run('保存署名', async () => { await request(`/api/projects/${projectId}/review/author`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: author.trim() }) }) })}>保存署名</button>
+    <button disabled={!!busy || !state.remote} onClick={() => void run('同步审阅', async () => { const result = await request<{ threads: number; pending: number }>(`/api/projects/${projectId}/git/review-sync`, post()); await onReload(); setMessage(`同步完成：${result.threads} 条审阅，待发送 ${result.pending} 条`) })}>同步审阅记录</button></div>
   </div>
 }

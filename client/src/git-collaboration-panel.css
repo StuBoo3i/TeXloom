@@ -1,15 +1,20 @@
-.git-collaboration { gap: 8px; }
+.git-collaboration { display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
+.git-collaboration > svg { flex: none; }
+.git-collaboration > strong { margin: 2px 0 0; }
+.git-collaboration > p { margin: 0; }
+.git-collaboration > button { align-self: flex-start; min-height: 31px; }
 .git-collaboration label { display: block; width: 100%; color: #5b7890; font-size: 11px; font-weight: 700; }
 .git-collaboration input, .git-collaboration select { width: 100%; min-width: 0; height: 31px; margin-top: 5px; padding: 0 7px; border: 1px solid #d1e0eb; border-radius: 5px; background: #fff; color: #31536d; font-size: 11px; }
-.git-collab-actions { display: flex; gap: 5px; width: 100%; }
+.git-collab-actions { display: flex; gap: 8px; width: 100%; }
 .git-collab-actions button { flex: 1; }
 .git-collaboration button { display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
-.git-collab-divider { width: 100%; border-top: 1px solid #dce7ef; margin: 6px 0; }
-.git-collab-link { display: block; color: var(--theme-accent); font-size: 11px; font-weight: 700; }
+.git-collab-divider { width: 100%; border-top: 1px solid #dce7ef; margin: 8px 0 4px; }
+.git-collab-link { display: block; color: var(--theme-accent); font-size: 11px; font-weight: 700; line-height: 1.5; }
 .git-branch-files { max-height: 130px; width: 100%; overflow: auto; border: 1px solid #dce7ef; border-radius: 5px; }
 .git-branch-files button { width: 100%; justify-content: flex-start; text-align: left; border-radius: 0; border: 0; background: transparent; color: #476783; font-size: 11px; }
 .git-branch-preview { width: 100%; max-height: 180px; overflow: auto; padding: 8px; border: 1px solid #dce7ef; background: #f7fbfe; color: #35546d; white-space: pre-wrap; word-break: break-word; font-size: 10px; }
 .git-collab-message { width: 100%; color: var(--theme-accent-strong); font-size: 11px; }
+.git-collab-message.error { color: #b53c38; overflow-wrap: anywhere; }
 :root[data-theme=night] .git-collaboration input, :root[data-theme=night] .git-collaboration select, :root[data-theme=night] .git-branch-preview { background: #27384e; color: #e0eafa; border-color: #45617d; }
 :root[data-theme=eye] .git-collaboration input, :root[data-theme=eye] .git-collaboration select, :root[data-theme=eye] .git-branch-preview { background: #f1faf2; color: #263f33; border-color: #a8cdb0; }
 .review-origin, .review-stale { display: block; margin: 4px 0; font-size: 10px; color: #6e899e; }

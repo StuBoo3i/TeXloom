@@ -15,7 +15,7 @@
 
 | 写作与预览 | 项目管理 | 协作与扩展 |
 | --- | --- | --- |
-| Monaco 编辑器、LaTeX 工具栏、PDF 预览与 SyncTeX 双向定位 | 项目分类与标签、批量导入导出、文件树、全文搜索、历史快照 | GitHub 私有仓库分支协作、评论与修改建议、可选 DeepSeek 助手 |
+| Monaco 语法着色与上下文补全、LaTeX 插入工具栏、PDF 预览与 SyncTeX 双向定位 | 项目分类与标签、批量导入导出、文件树、全文搜索、历史快照 | GitHub 私有仓库分支协作、评论与修改建议、本地及 DeepSeek 宏包推荐、可选 AI 写作助手 |
 
 ### 产品首页与工作台
 
@@ -61,49 +61,55 @@ flowchart LR
 
 这些限制只约束 TeXloom 内的操作。正式代码审阅和主分支保护请在 GitHub 仓库中配置；不要把仓库访问权限授予不可信人员。
 
-## 快速开始
+## 部署与启动（Windows 本机）
+
+### 环境要求
+
+- Windows 10/11 和可用的桌面会话；本地文件夹选择功能需要桌面会话。
+- Node.js 20.19+ 或 22.12+（推荐 Node.js 24）及 npm；使用克隆命令还需要 Git。
+- 仓库中的 `runtime/tectonic.exe`。若该文件缺失，请从 [Tectonic 官方发布页](https://github.com/tectonic-typesetting/tectonic/releases) 下载 Windows 版并放到该路径。
+
+首次编译时，Tectonic 可能联网下载 LaTeX 支持文件并缓存在本机。服务默认只监听 `127.0.0.1:3001`，供这台电脑上的浏览器访问。
+
+### 首次部署
+
+在 PowerShell 中执行：
 
 ```powershell
 git clone https://github.com/StuBoo3i/TeXloom.git
 cd TeXloom
-.\start.ps1
+npm ci --include=dev
+npm run build
+npm run start
 ```
 
-也可以在资源管理器中双击 `start.cmd`。首次启动会自动安装 npm 依赖并构建网页，完成后访问 **<http://127.0.0.1:3001>** 查看产品首页，点击“打开工作台”进入实际项目页面。终端需要保持开启；按 `Ctrl+C` 停止服务。
+构建完成后打开 <http://127.0.0.1:3001/>；点击“打开工作台”进入项目列表，也可直接打开 <http://127.0.0.1:3001/?view=workspace>。保持终端开启，按 `Ctrl+C` 停止服务。
 
-## 环境
+### 日常启动
 
-- Windows 10/11
-- Node.js 20.19+ 或 22.12+；推荐 Node.js 24
-- `runtime/tectonic.exe`（仓库附带 [Tectonic 官方 Windows 版](https://github.com/tectonic-typesetting/tectonic/releases)；如文件缺失，请从官方发布页下载并放到该路径）
+在 TeXloom 目录双击 `start.cmd`，或在 PowerShell 中执行 `npm run start`。也可以运行 `.\start.ps1`：启动脚本会在缺少 `node_modules/` 时安装依赖、在缺少 `dist/index.html` 时构建网页。PowerShell 若限制运行脚本，使用 `start.cmd` 即可。
 
-首次编译时，Tectonic 可能联网下载 LaTeX 支持文件并缓存在本机。此后常用文件可复用缓存。
+### 更新已有部署
 
-## 启动
-
-### 日常使用
-
-双击 `start.cmd`，或在项目目录打开 PowerShell：
+先按 `Ctrl+C` 停止服务，再在项目目录执行：
 
 ```powershell
-.\start.ps1
+git pull --ff-only
+npm ci --include=dev
+npm run build
+npm run start
 ```
 
-- 打开 <http://127.0.0.1:3001> 查看产品首页，再点击“打开工作台”；也可直接进入 <http://127.0.0.1:3001/?view=workspace>。
-- 保持终端开启；结束时按 `Ctrl+C`。
-- 修改前端源码后，运行 `npm run build` 并重启服务。启动脚本只会在构建文件缺失时自动构建。
+如果通过 ZIP 获取新版本，将新源码放入原目录后执行后面三条 npm 命令。运行时数据位于 `projects/` 和 `data/`，使用自定义根目录的项目仍保留在所选位置；更新源码前请保留这些目录。启动脚本检测到旧的 `dist/index.html` 时不会自动重新构建，因此更新源码后必须执行 `npm run build`。
 
 ### 开发模式
 
 ```powershell
-npm install
+npm ci --include=dev
 npm run dev
 ```
 
-| 服务 | 地址 |
-| --- | --- |
-| 开发页面 | <http://127.0.0.1:5173> |
-| 本地 API | <http://127.0.0.1:3001> |
+开发页面位于 <http://127.0.0.1:5173/>，Vite 将 `/api` 请求转发给 <http://127.0.0.1:3001/>；后端修改会由 `tsx watch` 重启。正式使用页面由 `npm run build` 生成并通过 `npm run start` 提供。
 
 ## 使用
 
@@ -145,6 +151,7 @@ npm run dev
 ### 写作与定位
 
 - 顶部菜单集中管理文件、编辑、视图和项目操作。编辑器工具栏提供撤销、重做、标题、格式、公式、符号、链接、列表、引用、图片和表格等常用操作；操作作用于 Monaco 当前光标或选区，并可撤销。
+- 源码编辑器按光标位置补全常用 LaTeX 命令、数学符号、环境、宏包、项目标签、文献键、项目文件路径，以及当前文件定义的命令。标题、分式、图片等补全项提供可跳转的参数模板；注释和逐字环境内不会弹出 LaTeX 补全。项目标签和文献键会从当前项目的 `.tex`、`.bib` 文件读取。
 - LaTeX 命令、环境、标题、引用、公式、数字和注释会随网页颜色风格着色。
 - 编译后点击定位按钮，或按 `Ctrl+Alt+J`，可从源码跳转到 PDF；双击 PDF 页面可返回源码行。此功能依赖 SyncTeX 数据，已有的旧 PDF 需要重新编译。
 
@@ -206,7 +213,9 @@ npm run dev
 2. 在 AI 面板选择问答、翻译、润色、报错解释、源码改写、公式或表格生成，也可输入自定义指令。
 3. 先预览原文与生成结果，再决定是否应用到编辑器。表格插入面板还可用支持视觉输入的模型识别 PNG/JPEG 表格图片。
 
-**密钥与数据：** Key 由本机后端使用 Windows 当前用户的 DPAPI 加密保存，不写入浏览器存储、项目文件或导出的 ZIP。AI 请求会把你选择的文本、输入的要求，以及明确使用的编译日志发送到 DeepSeek。
+**宏包建议：** AI 面板的“宏包建议”页可先用本地规则分析主文件、需求和最近编译日志，无需 API Key。配置 Key 后，可主动点击“DeepSeek 分析”，让 AI 结合需求、当前选中的源码、主文件导言区及可选日志推荐宏包。后端只接受内置目录中的宏包名称，标出已经加载的宏包，并提供 CTAN 资料。点击“预览并添加”查看要插入的 `\usepackage` 声明；确认时会核对主文件是否变化，防止覆盖新编辑。添加后请实际编译确认兼容性；建议不会自动下载或安装宏包。
+
+**密钥与数据：** Key 由本机后端使用 Windows 当前用户的 DPAPI 加密保存，不写入浏览器存储、项目文件或导出的 ZIP。AI 写作请求会把你选择的文本、输入的要求，以及明确使用的编译日志发送到 DeepSeek。宏包分析仅在点击“DeepSeek 分析”时发送需求、选中的源码（最多 3000 字符）、导言区（最多 12000 字符）及勾选的日志（最多 4000 字符）。
 
 **费用：** 普通编辑、编译和项目管理无需 API Key。TeXloom 本身不设付费功能；DeepSeek API 由你的账户按其服务规则计费。
 
@@ -238,7 +247,7 @@ TeXloom 源码采用 MIT 许可证，见 `LICENSE`。第三方许可证与来源
 
 ```powershell
 npm run build
-npx tsx --test tests/editor-features.test.ts tests/synctex.test.ts tests/git-collab.test.ts tests/review-events.test.ts
+npx tsx --test tests/editor-features.test.ts tests/synctex.test.ts tests/git-collab.test.ts tests/review-events.test.ts tests/latex-completion.test.ts tests/package-advice.test.ts
 ```
 
 其他验证方式及其运行条件：
@@ -249,6 +258,7 @@ npx tsx --test tests/editor-features.test.ts tests/synctex.test.ts tests/git-col
 | `tests/ai-stream-smoke.ts` | 用本地模拟响应验证流式链路，不访问 DeepSeek |
 | `tests/collaboration-smoke.mjs` | 用两个临时项目和本地临时裸仓库验证分支与审阅同步；测试服务需设置 `TEXLOOM_TEST_LOCAL_GIT=1` |
 | `tests/folder-projects-smoke.mjs` | 验证批量导入导出、分类元数据、防覆盖和敏感文件跳过；测试服务需设置 `TEXLOOM_TEST_FOLDER_PICKER=1` |
+| `tests/package-advice-smoke.mjs` | 在运行中的本地服务创建并删除临时项目，检查宏包建议、预览防覆盖和 Tectonic 实际编译；默认访问 `3002`，也可设置 `TEXLOOM_URL` |
 
 普通服务只接受 GitHub 远程仓库；正式服务不接受客户端传入的文件夹路径。
 
