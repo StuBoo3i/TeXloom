@@ -1,0 +1,25 @@
+.pdf-stage {
+  display: block;
+  text-align: center;
+}
+
+.pdf-page {
+  display: block;
+  margin: 0 auto;
+}
+
+.pdf-page-wrap { position: relative; display: inline-block; margin: 0 auto; text-align: left; }
+.pdf-page.reverse-enabled { cursor: crosshair; }
+.pdf-sync-marker { position: absolute; width: 16px; height: 16px; border: 3px solid var(--theme-accent); border-radius: 50%; background: #ffffff88; box-shadow: 0 0 0 5px #ffffffa8; transform: translate(-50%, -50%); pointer-events: none; animation: sync-pulse 2s ease-out; }
+.pdf-sync-hint { position: absolute; right: 13px; font-size: 10px; color: #7c95a9; white-space: nowrap; }
+.pdf-toolbar { position: relative; }
+@keyframes sync-pulse { 0% { box-shadow: 0 0 0 1px var(--theme-accent); } 45% { box-shadow: 0 0 0 12px transparent; } 100% { box-shadow: 0 0 0 5px #ffffffa8; } }
+@media (max-width: 1200px) { .pdf-sync-hint { display: none; } }
+
+.pdf-empty {
+  margin: 28vh auto 0;
+}
+:root {
+  font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
+}
+
