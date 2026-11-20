@@ -1,6 +1,54 @@
-# TeXloom
+<div align="center">
+  <img src="icon.png" alt="TeXloom 图标" width="72" />
+  <h1>TeXloom</h1>
+  <p>在浏览器中组织 LaTeX 项目、专注写作，并用本地 Tectonic 引擎生成 PDF。</p>
+  <p><strong>本地工作空间 · 即时预览 · GitHub 私有仓库协作</strong></p>
+</div>
 
-本地 LaTeX 工作台：在浏览器中管理项目、编辑源码、使用 Tectonic 编译，并预览 PDF。项目文件保存在本机；适合 Windows 单用户使用。
+![TeXloom 首页：创建项目、导入 ZIP 或 GitHub 仓库](docs/images/home.png)
+
+> TeXloom 面向 Windows 单用户桌面环境。项目文件保存在本机；只有你主动使用 Git 协作时，所选项目的源码才会同步到对应远程仓库。
+
+## 功能一览
+
+| 写作与预览 | 项目管理 | 协作与扩展 |
+| --- | --- | --- |
+| Monaco 编辑器、LaTeX 工具栏、PDF 预览与 SyncTeX 双向定位 | 项目分类与标签、批量导入导出、文件树、全文搜索、历史快照 | GitHub 私有仓库分支协作、评论与修改建议、可选 DeepSeek 助手 |
+
+### 从源码到 PDF
+
+```mermaid
+flowchart LR
+    A["浏览器：编辑 LaTeX"] --> B["本机 Fastify 服务"]
+    B --> C[("projects/：本地项目文件")]
+    B --> D["本机 Tectonic 编译"]
+    D --> E["PDF + SyncTeX"]
+    E --> A
+```
+
+## API Key 管理与多人协作安全
+
+- **项目留在本机。** 项目文件放在 `projects/`，应用不会自动上传项目；该目录及本机设置目录 `data/` 均被仓库的 `.gitignore` 排除。只有你主动连接远程仓库并执行 Git 同步时，相应项目源码才会传到该远程仓库。
+- **密钥由本机管理。** DeepSeek API Key 由 Windows 当前用户的 DPAPI 加密后保存在 `data/ai-settings.json`。设置接口只返回是否已配置，不回传明文；可在设置中清除 Key、调整模型、输出上限和超时。调用 AI 时，后端才解密 Key，并将你提交的提示词、选中文本、额外上下文或图片发送至 DeepSeek。普通编辑和编译无需 Key。
+- **协作使用个人分支。** Git 远程地址只接受不含凭据的 GitHub HTTPS 或 SSH 地址；请使用 Git Credential Manager 或 SSH 登录，不要把令牌放进 URL。应用内拒绝直接推送 `main` / `master`，拉取仅允许快进，并在拉取前检查本地未提交改动。评论与修改建议可同步到独立的 `texloom-reviews` 分支；接受建议前会校验原文。
+
+### 数据何时离开本机
+
+```mermaid
+flowchart LR
+    subgraph PC["你的电脑"]
+      P[("projects/：项目文件")]
+      K[("data/：DPAPI 加密的 API Key")]
+      A["本机后端"]
+      P --> A
+      K --> A
+    end
+    A -->|"仅在使用 AI 时：所选内容及请求"| D["DeepSeek API"]
+    P -->|"仅在主动执行 Git 同步时：项目源码"| G["GitHub 项目仓库"]
+    A -->|"同步审阅记录时：评论事件"| R["GitHub texloom-reviews 分支"]
+```
+
+这些限制只约束 TeXloom 内的操作。正式代码审阅和主分支保护请在 GitHub 仓库中配置；不要把仓库访问权限授予不可信人员。
 
 ## 快速开始
 
@@ -10,7 +58,7 @@ cd TeXloom
 .\start.ps1
 ```
 
-也可以在资源管理器中双击 `start.cmd`。首次启动会自动安装 npm 依赖并构建网页，完成后访问 <http://127.0.0.1:3001>。终端需要保持开启；按 `Ctrl+C` 停止服务。
+也可以在资源管理器中双击 `start.cmd`。首次启动会自动安装 npm 依赖并构建网页，完成后访问 **<http://127.0.0.1:3001>**。终端需要保持开启；按 `Ctrl+C` 停止服务。
 
 ## 环境
 
@@ -41,12 +89,18 @@ npm run dev
 
 ## 使用
 
-1. 新建项目或导入包含 `.tex` 文件的 ZIP。
+1. 新建项目，导入包含 `.tex` 文件的 ZIP，或从本地文件夹批量导入；项目首页支持分类、标签和搜索。
 2. 在左侧选文件，中间编辑源码。修改后自动保存，也可以点击“保存”。
 3. 点击“编译 PDF”。右侧显示最新的成功结果；底部可查看编译日志。小项目默认自动编译；主文件达到 100 KB 时默认关闭自动编译，可用顶部循环箭头按钮切换。
-4. 可以上传资源、设置主 `.tex` 文件、导出项目 ZIP 或下载 PDF。
+4. 可以上传资源、设置主 `.tex` 文件、导出项目 ZIP 或下载 PDF；也可以选择多个项目批量导出到本地文件夹。
 
 编辑页顶部的“布局”菜单可以切换拆分视图、仅编辑器和仅 PDF，也可以在新标签页打开 PDF。拆分视图的中间分隔条可拖动，双击可恢复各占一半；每个项目会记住自己的布局和宽度。
+
+### 首页分类与批量文件夹操作
+
+- 首页按所有、个人、共享、归档及自定义标签筛选项目；项目卡片可切换分类、归档或恢复、设置标签。归档不删除文件。GitHub 导入的项目默认归为共享；已有 GitHub 项目若未设置分类，会根据本地提交作者数量推断，也可手动调整。共享分类只用于本地整理，不授予或验证 GitHub 权限。
+- 点击“从本地文件夹批量导入”后，选择一个含 `.tex` 文件的项目目录，或包含多个项目子目录的父目录。先预览候选项目，再确认复制到 TeXloom。一次最多 30 个项目；每个项目最多 1000 个文件、100 MB，单文件最多 20 MB。导入跳过 Git 历史、内部缓存、`.env` 和常见私钥文件。
+- 勾选项目并点击“导出到本地文件夹”，每个项目写入独立目录。同名目录会自动编号，不覆盖原有内容。导出的 `.texloom-project.json` 保存项目名称、主文件、分类与标签，重新导入时恢复这些设置。系统文件夹选择器要求 Windows 桌面会话。
 
 ## 编辑与项目工具
 
@@ -102,6 +156,8 @@ npx tsx --test tests/editor-features.test.ts tests/synctex.test.ts tests/git-col
 `tests/api-smoke.mjs` 和 `tests/ai-settings-smoke.mjs` 需要另起服务并设置 `TEXLOOM_URL`；它们使用临时测试项目或测试密钥。`tests/ai-stream-smoke.ts` 使用本地模拟响应检查流式链路，不访问 DeepSeek。
 
 `tests/collaboration-smoke.mjs` 使用两个临时项目和一个本地临时裸仓库验证分支与审阅同步。仅在测试服务器设置 `TEXLOOM_TEST_LOCAL_GIT=1` 时运行；普通服务只接受 GitHub 远程仓库。
+
+`tests/folder-projects-smoke.mjs` 验证批量导入导出、分类元数据、防覆盖和敏感文件跳过。仅在单独测试服务器设置 `TEXLOOM_TEST_FOLDER_PICKER=1` 时运行；正式服务不接受客户端传入的文件夹路径。
 
 ## 常见问题
 

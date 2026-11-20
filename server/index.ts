@@ -4,7 +4,7 @@ import fastifyStatic from '@fastify/static'
 import AdmZip from 'adm-zip'
 import { spawn } from 'node:child_process'
 import { createReadStream, existsSync } from 'node:fs'
-import { copyFile, lstat, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { copyFile, lstat, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { randomUUID } from 'node:crypto'
@@ -21,13 +21,14 @@ const projectsRoot = path.join(root, 'projects')
 const tectonicPath = path.join(root, 'runtime', process.platform === 'win32' ? 'tectonic.exe' : 'tectonic')
 const app = Fastify({ logger: false, bodyLimit: 2 * 1024 * 1024 })
 
-type Project = { id: string; name: string; mainFile: string; createdAt: string; updatedAt: string }
+type Project = { id: string; name: string; mainFile: string; createdAt: string; updatedAt: string; sharing?: 'personal' | 'shared'; archived?: boolean; tags?: string[] }
 type FileEntry = { path: string; type: 'file' | 'directory'; size?: number }
 type Job = { id: string; projectId: string; status: 'running' | 'success' | 'error'; log: string; startedAt: string; finishedAt?: string }
 type Snapshot = { id: string; note: string; createdAt: string; fileCount: number }
 const jobs = new Map<string, Job>()
 const activeProjects = new Set<string>()
 const reviewLocks = new Map<string, Promise<void>>()
+const folderSelections = new Map<string, { path: string; mode: 'import' | 'export'; expires: number }>()
 
 async function withReviewLock<T>(id: string, action: () => Promise<T>): Promise<T> {
   const previous = reviewLocks.get(id) ?? Promise.resolve()
@@ -48,6 +49,91 @@ function fail(statusCode: number, message: string): never {
 function projectDir(id: string): string {
   if (!/^[0-9a-f-]{36}$/.test(id)) fail(400, '无效的项目 ID')
   return path.join(projectsRoot, id)
+}
+
+function selectedFolder(token: unknown, mode: 'import' | 'export', consume = false): string {
+  if (typeof token !== 'string') fail(400, '请先选择本地文件夹')
+  const item = folderSelections.get(token)
+  if (!item || item.mode !== mode || item.expires < Date.now()) fail(400, '文件夹选择已失效，请重新选择')
+  if (consume) folderSelections.delete(token)
+  return item.path
+}
+
+async function chooseWindowsFolder(mode: 'import' | 'export'): Promise<string | null> {
+  if (process.platform !== 'win32') fail(501, '当前文件夹选择仅支持 Windows')
+  const title = mode === 'import' ? '选择包含 LaTeX 项目的文件夹' : '选择批量导出的目标文件夹'
+  const script = `[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false); Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = '${title}'; $d.ShowNewFolderButton = $true; if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Write($d.SelectedPath) }`
+  const child = spawn('powershell.exe', ['-NoProfile', '-STA', '-NonInteractive', '-Command', script], { shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+  let output = ''
+  let error = ''
+  child.stdout.on('data', (chunk: Buffer) => { output = (output + chunk.toString('utf8')).slice(-4000) })
+  child.stderr.on('data', (chunk: Buffer) => { error = (error + chunk.toString('utf8')).slice(-4000) })
+  const timer = setTimeout(() => child.kill(), 300_000)
+  try {
+    const code = await new Promise<number>((resolve, reject) => { child.once('error', reject); child.once('close', value => resolve(value ?? -1)) })
+    if (code !== 0) fail(422, `无法打开文件夹选择器：${error.trim().slice(0, 200)}`)
+    return output.trim() ? await realpath(output.trim()) : null
+  } finally { clearTimeout(timer) }
+}
+
+type FolderCandidate = { name: string; directory: string; files: { relative: string; absolute: string; size: number }[]; mainFile: string; bytes: number; metadata?: { name?: string; mainFile?: string; sharing?: 'personal' | 'shared'; archived?: boolean; tags?: string[] } }
+const ignoredImportDirs = new Set(['.git', '.openleaf', '.texloom', 'node_modules', 'dist', 'data', 'runtime'])
+const ignoredImportFiles = new Set(['project.json', '.texloom-project.json', '.env', 'id_rsa', 'id_ed25519'])
+
+async function scanCandidate(directory: string, name: string): Promise<FolderCandidate | null> {
+  const files: FolderCandidate['files'] = []
+  let bytes = 0
+  async function visit(current: string, prefix: string, depth: number): Promise<void> {
+    if (depth > 10) fail(413, `项目“${name}”目录层级过深`)
+    for (const entry of await readdir(current, { withFileTypes: true })) {
+      if (entry.isSymbolicLink()) continue
+      const absolute = path.join(current, entry.name)
+      const details = await lstat(absolute)
+      if (details.isSymbolicLink()) continue
+      if (entry.isDirectory()) {
+        if (ignoredImportDirs.has(entry.name)) continue
+        await visit(absolute, prefix ? `${prefix}/${entry.name}` : entry.name, depth + 1)
+      } else if (entry.isFile()) {
+        if (ignoredImportFiles.has(entry.name) || entry.name.startsWith('.env.') || /\.(?:pem|key)$/i.test(entry.name)) continue
+        const relative = safeRelative(prefix ? `${prefix}/${entry.name}` : entry.name)
+        if (details.size > 20 * 1024 * 1024) fail(413, `项目“${name}”含有超过 20 MB 的文件`)
+        bytes += details.size
+        if (files.length >= 1000 || bytes > 100 * 1024 * 1024) fail(413, `项目“${name}”超过 1000 个文件或 100 MB`)
+        files.push({ relative, absolute, size: details.size })
+      }
+    }
+  }
+  await visit(directory, '', 0)
+  const tex = files.filter(file => file.relative.toLowerCase().endsWith('.tex'))
+  if (!tex.length) return null
+  const fallbackMain = tex.find(file => file.relative === 'main.tex')?.relative ?? tex.sort((a, b) => a.relative.split('/').length - b.relative.split('/').length || a.relative.localeCompare(b.relative))[0].relative
+  let metadata: FolderCandidate['metadata']
+  try {
+    const manifest = path.join(directory, '.texloom-project.json')
+    const info = await lstat(manifest)
+    if (!info.isFile() || info.isSymbolicLink() || info.size > 64 * 1024) fail(413, '项目元数据文件无效或过大')
+    const raw = JSON.parse(await readFile(manifest, 'utf8')) as FolderCandidate['metadata']
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) metadata = raw
+  } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error }
+  const mainFile = typeof metadata?.mainFile === 'string' && tex.some(file => file.relative === metadata!.mainFile) ? metadata.mainFile : fallbackMain
+  return { name: typeof metadata?.name === 'string' && metadata.name.trim() ? metadata.name.trim().slice(0, 80) : name.slice(0, 80), directory, files, mainFile, bytes, metadata }
+}
+
+async function folderCandidates(directory: string): Promise<FolderCandidate[]> {
+  const entries = await readdir(directory, { withFileTypes: true })
+  if (entries.some(entry => entry.isFile() && entry.name.toLowerCase().endsWith('.tex'))) {
+    const one = await scanCandidate(directory, path.basename(directory))
+    return one ? [one] : []
+  }
+  const folders = entries.filter(entry => entry.isDirectory() && !entry.isSymbolicLink() && !ignoredImportDirs.has(entry.name))
+  if (folders.length > 50) fail(413, '选中的目录包含过多子文件夹，请选择更具体的目录')
+  const result: FolderCandidate[] = []
+  for (const entry of folders) {
+    const candidate = await scanCandidate(path.join(directory, entry.name), entry.name)
+    if (candidate) result.push(candidate)
+  }
+  if (result.length > 30) fail(413, '一次最多导入 30 个项目')
+  return result
 }
 
 function safeRelative(input: unknown): string {
@@ -104,6 +190,34 @@ async function getProject(id: string): Promise<Project> {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') fail(404, '项目不存在')
     throw error
   }
+}
+
+function validTag(input: unknown): string {
+  if (typeof input !== 'string') fail(400, '标签名称无效')
+  const name = input.trim()
+  if (!name || name.length > 30 || /[\x00-\x1f]/.test(name)) fail(400, '标签名称须为 1 至 30 个字符')
+  return name
+}
+
+const tagsFile = path.join(root, 'data', 'project-tags.json')
+async function readTags(): Promise<string[]> {
+  try { const value = JSON.parse(await readFile(tagsFile, 'utf8')) as unknown; return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string').slice(0, 100) : [] }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error }
+}
+async function writeTags(tags: string[]): Promise<void> {
+  await mkdir(path.dirname(tagsFile), { recursive: true })
+  await writeFile(`${tagsFile}.tmp`, JSON.stringify([...new Set(tags)].sort((a, b) => a.localeCompare(b, 'zh-CN'))), 'utf8')
+  await rename(`${tagsFile}.tmp`, tagsFile)
+}
+
+async function projectForList(project: Project): Promise<Project> {
+  if (project.sharing) return project
+  const directory = projectDir(project.id)
+  if (!existsSync(path.join(directory, '.git'))) return { ...project, sharing: 'personal' }
+  const remote = await gitCommand(directory, ['remote', 'get-url', 'origin']).catch(() => '')
+  try { githubRemote(remote) } catch { return { ...project, sharing: 'personal' } }
+  const authors = await gitCommand(directory, ['shortlog', '-sne', '--all']).catch(() => '')
+  return { ...project, sharing: authors.split(/\r?\n/).filter(Boolean).length > 1 ? 'shared' : 'personal' }
 }
 
 async function saveProject(project: Project): Promise<void> {
@@ -302,7 +416,7 @@ async function createProject(name: string): Promise<Project> {
   const clean = name.trim()
   if (!clean || clean.length > 80) fail(400, '项目名称须为 1 至 80 个字符')
   const now = new Date().toISOString()
-  const project: Project = { id: randomUUID(), name: clean, mainFile: 'main.tex', createdAt: now, updatedAt: now }
+  const project: Project = { id: randomUUID(), name: clean, mainFile: 'main.tex', createdAt: now, updatedAt: now, sharing: 'personal', archived: false, tags: [] }
   await mkdir(projectDir(project.id), { recursive: true })
   await writeFile(path.join(projectDir(project.id), 'main.tex'), defaultTex(clean), 'utf8')
   await saveProject(project)
@@ -500,10 +614,142 @@ app.get('/api/projects', async () => {
   const projects: Project[] = []
   for (const entry of await readdir(projectsRoot, { withFileTypes: true })) {
     if (entry.isDirectory() && /^[0-9a-f-]{36}$/.test(entry.name)) {
-      try { projects.push(await getProject(entry.name)) } catch { /* ignore incomplete project */ }
+      try { projects.push(await projectForList(await getProject(entry.name))) } catch { /* ignore incomplete project */ }
     }
   }
   return projects.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+})
+
+app.get('/api/project-tags', async () => readTags())
+app.post<{ Body: { name: string } }>('/api/project-tags', async request => {
+  const name = validTag(request.body?.name)
+  const tags = await readTags()
+  if (tags.includes(name)) fail(409, '标签已存在')
+  if (tags.length >= 100) fail(413, '标签数量已达上限')
+  await writeTags([...tags, name])
+  return { name }
+})
+app.patch<{ Params: { name: string }; Body: { name: string } }>('/api/project-tags/:name', async request => {
+  const original = validTag(request.params.name)
+  const replacement = validTag(request.body?.name)
+  const tags = await readTags()
+  if (!tags.includes(original)) fail(404, '标签不存在')
+  if (replacement !== original && tags.includes(replacement)) fail(409, '标签已存在')
+  await writeTags(tags.map(item => item === original ? replacement : item))
+  for (const entry of await readdir(projectsRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !/^[0-9a-f-]{36}$/.test(entry.name)) continue
+    const project = await getProject(entry.name)
+    if (project.tags?.includes(original)) { project.tags = project.tags.map(item => item === original ? replacement : item); await saveProject(project) }
+  }
+  return { name: replacement }
+})
+app.delete<{ Params: { name: string } }>('/api/project-tags/:name', async request => {
+  const name = validTag(request.params.name)
+  const tags = await readTags()
+  if (!tags.includes(name)) fail(404, '标签不存在')
+  await writeTags(tags.filter(item => item !== name))
+  for (const entry of await readdir(projectsRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !/^[0-9a-f-]{36}$/.test(entry.name)) continue
+    const project = await getProject(entry.name)
+    if (project.tags?.includes(name)) { project.tags = project.tags.filter(item => item !== name); await saveProject(project) }
+  }
+  return { ok: true }
+})
+
+app.post<{ Body: { mode: 'import' | 'export'; testPath?: string } }>('/api/folders/select', async request => {
+  if (request.body?.mode !== 'import' && request.body?.mode !== 'export') fail(400, '文件夹操作无效')
+  const chosen = process.env.TEXLOOM_TEST_FOLDER_PICKER === '1' && request.body.testPath && path.isAbsolute(request.body.testPath)
+    ? await realpath(request.body.testPath) : await chooseWindowsFolder(request.body.mode)
+  if (!chosen) return { cancelled: true }
+  const details = await lstat(chosen)
+  if (!details.isDirectory() || details.isSymbolicLink()) fail(400, '请选择普通文件夹')
+  const token = randomUUID()
+  folderSelections.set(token, { path: chosen, mode: request.body.mode, expires: Date.now() + 10 * 60_000 })
+  return { token, name: path.basename(chosen) || chosen }
+})
+
+app.post<{ Body: { token: string } }>('/api/folders/inspect', async request => {
+  const directory = selectedFolder(request.body?.token, 'import')
+  const candidates = await folderCandidates(directory)
+  if (!candidates.length) fail(400, '所选文件夹及其直接子文件夹中没有 LaTeX 项目')
+  return { candidates: candidates.map(item => ({ name: item.name, files: item.files.length, bytes: item.bytes, mainFile: item.mainFile })) }
+})
+
+app.post<{ Body: { token: string } }>('/api/folders/import', async request => {
+  const directory = selectedFolder(request.body?.token, 'import')
+  const candidates = await folderCandidates(directory)
+  if (!candidates.length) fail(400, '没有可导入的 LaTeX 项目')
+  const imported: Project[] = []
+  const failed: { name: string; error: string }[] = []
+  for (const candidate of candidates) {
+    let project: Project | null = null
+    try {
+      project = await createProject(candidate.name || '本地项目')
+      await rm(path.join(projectDir(project.id), 'main.tex'), { force: true })
+      for (const file of candidate.files) {
+        const source = await realpath(file.absolute)
+        const relative = path.relative(candidate.directory, source)
+        if (!relative || relative.startsWith('..') || path.isAbsolute(relative) || !(await lstat(source)).isFile()) fail(400, '源文件已变化，请重新选择文件夹')
+        const destination = await safeFile(project.id, file.relative)
+        await mkdir(path.dirname(destination), { recursive: true })
+        await copyFile(source, destination)
+      }
+      project.mainFile = candidate.mainFile
+      if (candidate.metadata?.sharing === 'personal' || candidate.metadata?.sharing === 'shared') project.sharing = candidate.metadata.sharing
+      if (typeof candidate.metadata?.archived === 'boolean') project.archived = candidate.metadata.archived
+      if (Array.isArray(candidate.metadata?.tags)) {
+        project.tags = [...new Set(candidate.metadata.tags.filter((tag): tag is string => typeof tag === 'string').map(tag => validTag(tag)))].slice(0, 20)
+        const known = await readTags()
+        await writeTags([...known, ...project.tags].slice(0, 100))
+      }
+      await saveProject(project)
+      imported.push(project)
+    } catch (error) {
+      failed.push({ name: candidate.name, error: error instanceof Error ? error.message : String(error) })
+      if (project) await rm(projectDir(project.id), { recursive: true, force: true })
+    }
+  }
+  folderSelections.delete(request.body.token)
+  return { imported, failed }
+})
+
+app.post<{ Body: { token: string; projectIds: string[] } }>('/api/folders/export', async request => {
+  const directory = selectedFolder(request.body?.token, 'export')
+  const insideProjects = path.relative(projectsRoot, directory)
+  if (!insideProjects.startsWith('..') && !path.isAbsolute(insideProjects)) fail(400, '导出目标不能位于项目数据目录内')
+  if (!Array.isArray(request.body?.projectIds) || !request.body.projectIds.length || request.body.projectIds.length > 30) fail(400, '请选择 1 至 30 个项目')
+  const ids = [...new Set(request.body.projectIds)]
+  const exported: { id: string; folder: string; files: number }[] = []
+  const failed: { id: string; error: string }[] = []
+  for (const id of ids) {
+    let temporary = ''
+    try {
+      const project = await getProject(id)
+      const base = project.name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '-').replace(/[. ]+$/, '').slice(0, 80) || 'project'
+      let final = path.join(directory, base)
+      for (let index = 2; existsSync(final); index++) final = path.join(directory, `${base} (${index})`)
+      temporary = path.join(directory, `.texloom-export-${randomUUID()}`)
+      if (path.dirname(path.resolve(temporary)) !== path.resolve(directory) || path.dirname(path.resolve(final)) !== path.resolve(directory)) fail(400, '导出路径无效')
+      await mkdir(temporary)
+      const files = (await listProjectFiles(id)).filter(item => item.type === 'file')
+      if (files.some(item => item.path === '.texloom-project.json')) fail(409, '项目中已有 .texloom-project.json 文件，无法安全写入导出元数据')
+      for (const item of files) {
+        const source = await safeFile(id, item.path)
+        const destination = path.join(temporary, item.path)
+        await mkdir(path.dirname(destination), { recursive: true })
+        await copyFile(source, destination)
+      }
+      await writeFile(path.join(temporary, '.texloom-project.json'), JSON.stringify({ name: project.name, mainFile: project.mainFile, sharing: project.sharing ?? 'personal', archived: Boolean(project.archived), tags: project.tags ?? [] }, null, 2), 'utf8')
+      await rename(temporary, final)
+      exported.push({ id, folder: path.basename(final), files: files.length })
+      temporary = ''
+    } catch (error) {
+      failed.push({ id, error: error instanceof Error ? error.message : String(error) })
+      if (temporary && path.dirname(path.resolve(temporary)) === path.resolve(directory) && path.basename(temporary).startsWith('.texloom-export-')) await rm(temporary, { recursive: true, force: true })
+    }
+  }
+  folderSelections.delete(request.body.token)
+  return { exported, failed }
 })
 
 app.post<{ Body: { name: string } }>('/api/projects', async request => createProject(request.body?.name ?? ''))
@@ -524,7 +770,7 @@ app.post<{ Body: { url: string } }>('/api/projects/clone', async request => {
     const files = await listProjectFiles(id)
     const mainFile = files.find(item => item.type === 'file' && item.path === 'main.tex')?.path ?? files.find(item => item.type === 'file' && item.path.endsWith('.tex'))?.path
     if (!mainFile) fail(400, '远程仓库没有 .tex 文件')
-    const project: Project = { id, name: remote.repo, mainFile, createdAt: now, updatedAt: now }
+    const project: Project = { id, name: remote.repo, mainFile, createdAt: now, updatedAt: now, sharing: 'shared', archived: false, tags: [] }
     await saveProject(project)
     return project
   } catch (error) {
@@ -533,7 +779,7 @@ app.post<{ Body: { url: string } }>('/api/projects/clone', async request => {
   }
 })
 app.get<{ Params: { id: string } }>('/api/projects/:id', async request => getProject(request.params.id))
-app.patch<{ Params: { id: string }; Body: { name?: string; mainFile?: string } }>('/api/projects/:id', async request => {
+app.patch<{ Params: { id: string }; Body: { name?: string; mainFile?: string; sharing?: 'personal' | 'shared'; archived?: boolean; tags?: string[] } }>('/api/projects/:id', async request => {
   const project = await getProject(request.params.id)
   if (request.body?.name !== undefined) {
     const name = request.body.name.trim()
@@ -546,6 +792,21 @@ app.patch<{ Params: { id: string }; Body: { name?: string; mainFile?: string } }
     const file = await safeFile(project.id, mainFile)
     if (!existsSync(file)) fail(404, '主文件不存在')
     project.mainFile = mainFile
+  }
+  if (request.body?.sharing !== undefined) {
+    if (request.body.sharing !== 'personal' && request.body.sharing !== 'shared') fail(400, '项目分类无效')
+    project.sharing = request.body.sharing
+  }
+  if (request.body?.archived !== undefined) {
+    if (typeof request.body.archived !== 'boolean') fail(400, '归档状态无效')
+    project.archived = request.body.archived
+  }
+  if (request.body?.tags !== undefined) {
+    if (!Array.isArray(request.body.tags) || request.body.tags.length > 20) fail(400, '项目标签无效')
+    const available = await readTags()
+    const tags = request.body.tags.map(validTag)
+    if (tags.some(tag => !available.includes(tag))) fail(400, '存在未创建的标签')
+    project.tags = [...new Set(tags)]
   }
   await saveProject(project)
   return project
