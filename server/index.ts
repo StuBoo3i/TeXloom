@@ -3,7 +3,7 @@ import multipart from '@fastify/multipart'
 import fastifyStatic from '@fastify/static'
 import AdmZip from 'adm-zip'
 import { spawn } from 'node:child_process'
-import { createReadStream, existsSync } from 'node:fs'
+import { createReadStream, existsSync, lstatSync } from 'node:fs'
 import { copyFile, lstat, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -17,7 +17,12 @@ import { githubRemote, safeBranch } from './git-collab.js'
 import { foldReviewEvents, makeReviewEvent, readReviewEvents, writeReviewEvent, type ReviewEvent, type ReviewThread } from './review-events.js'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const projectsRoot = path.join(root, 'projects')
+const defaultProjectsRoot = path.join(root, 'projects')
+const workspaceConfigFile = process.env.TEXLOOM_TEST_WORKSPACE_CONFIG && path.isAbsolute(process.env.TEXLOOM_TEST_WORKSPACE_CONFIG)
+  ? process.env.TEXLOOM_TEST_WORKSPACE_CONFIG : path.join(root, 'data', 'workspace.json')
+let projectsRoot = defaultProjectsRoot
+let projectRoots = [defaultProjectsRoot]
+let workspaceConfigured = false
 const tectonicPath = path.join(root, 'runtime', process.platform === 'win32' ? 'tectonic.exe' : 'tectonic')
 const app = Fastify({ logger: false, bodyLimit: 2 * 1024 * 1024 })
 
@@ -28,7 +33,7 @@ type Snapshot = { id: string; note: string; createdAt: string; fileCount: number
 const jobs = new Map<string, Job>()
 const activeProjects = new Set<string>()
 const reviewLocks = new Map<string, Promise<void>>()
-const folderSelections = new Map<string, { path: string; mode: 'import' | 'export'; expires: number }>()
+const folderSelections = new Map<string, { path: string; mode: 'import' | 'export' | 'workspace'; expires: number }>()
 
 async function withReviewLock<T>(id: string, action: () => Promise<T>): Promise<T> {
   const previous = reviewLocks.get(id) ?? Promise.resolve()
@@ -48,10 +53,48 @@ function fail(statusCode: number, message: string): never {
 
 function projectDir(id: string): string {
   if (!/^[0-9a-f-]{36}$/.test(id)) fail(400, '无效的项目 ID')
+  for (const directory of projectRoots) {
+    const candidate = path.join(directory, id)
+    try {
+      const details = lstatSync(candidate)
+      if (details.isDirectory() && !details.isSymbolicLink() && existsSync(path.join(candidate, 'project.json'))) return candidate
+    } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+  }
   return path.join(projectsRoot, id)
 }
 
-function selectedFolder(token: unknown, mode: 'import' | 'export', consume = false): string {
+function projectRoot(id: string): string {
+  const directory = projectDir(id)
+  try {
+    const info = lstatSync(directory)
+    if (!info.isDirectory() || info.isSymbolicLink()) fail(400, '项目目录无效')
+    const metadata = lstatSync(path.join(directory, 'project.json'))
+    if (!metadata.isFile() || metadata.isSymbolicLink()) fail(400, '项目元数据无效')
+  } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') fail(404, '项目不存在'); throw error }
+  return path.dirname(directory)
+}
+
+async function projectIds(): Promise<string[]> {
+  const ids = new Set<string>()
+  for (const directory of projectRoots) {
+    for (const entry of await readdir(directory, { withFileTypes: true }).catch(error => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+      throw error
+    })) if (entry.isDirectory() && !entry.isSymbolicLink() && /^[0-9a-f-]{36}$/.test(entry.name)) ids.add(entry.name)
+  }
+  return [...ids]
+}
+
+async function writeWorkspaceConfig(activeRoot: string, roots: string[], configured: boolean): Promise<void> {
+  await mkdir(path.dirname(workspaceConfigFile), { recursive: true })
+  const temporary = `${workspaceConfigFile}.${randomUUID()}.tmp`
+  try {
+    await writeFile(temporary, JSON.stringify({ activeRoot, roots, configured }, null, 2), 'utf8')
+    await rename(temporary, workspaceConfigFile)
+  } finally { await rm(temporary, { force: true }).catch(() => {}) }
+}
+
+function selectedFolder(token: unknown, mode: 'import' | 'export' | 'workspace', consume = false): string {
   if (typeof token !== 'string') fail(400, '请先选择本地文件夹')
   const item = folderSelections.get(token)
   if (!item || item.mode !== mode || item.expires < Date.now()) fail(400, '文件夹选择已失效，请重新选择')
@@ -59,9 +102,9 @@ function selectedFolder(token: unknown, mode: 'import' | 'export', consume = fal
   return item.path
 }
 
-async function chooseWindowsFolder(mode: 'import' | 'export'): Promise<string | null> {
+async function chooseWindowsFolder(mode: 'import' | 'export' | 'workspace'): Promise<string | null> {
   if (process.platform !== 'win32') fail(501, '当前文件夹选择仅支持 Windows')
-  const title = mode === 'import' ? '选择包含 LaTeX 项目的文件夹' : '选择批量导出的目标文件夹'
+  const title = mode === 'import' ? '选择包含 LaTeX 项目的文件夹' : mode === 'export' ? '选择批量导出的目标文件夹' : '选择 TeXloom 项目根目录'
   const script = `[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false); Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = '${title}'; $d.ShowNewFolderButton = $true; if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Write($d.SelectedPath) }`
   const child = spawn('powershell.exe', ['-NoProfile', '-STA', '-NonInteractive', '-Command', script], { shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
   let output = ''
@@ -185,7 +228,15 @@ async function safeFile(id: string, relative: string): Promise<string> {
 }
 
 async function getProject(id: string): Promise<Project> {
-  try { return JSON.parse(await readFile(path.join(projectDir(id), 'project.json'), 'utf8')) as Project }
+  try {
+    const directory = projectDir(id)
+    const info = await lstat(directory)
+    if (!info.isDirectory() || info.isSymbolicLink()) fail(400, '项目目录无效')
+    const metadata = path.join(directory, 'project.json')
+    const metaInfo = await lstat(metadata)
+    if (!metaInfo.isFile() || metaInfo.isSymbolicLink()) fail(400, '项目元数据无效')
+    return JSON.parse(await readFile(metadata, 'utf8')) as Project
+  }
   catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') fail(404, '项目不存在')
     throw error
@@ -526,7 +577,16 @@ async function runCompile(job: Job, project: Project): Promise<void> {
   }
 }
 
-await mkdir(projectsRoot, { recursive: true })
+await mkdir(defaultProjectsRoot, { recursive: true })
+try {
+  const config = JSON.parse(await readFile(workspaceConfigFile, 'utf8')) as { activeRoot?: unknown; roots?: unknown; configured?: unknown }
+  if (typeof config.activeRoot === 'string' && path.isAbsolute(config.activeRoot)) {
+    projectsRoot = path.resolve(config.activeRoot)
+    projectRoots = [...new Set([projectsRoot, ...(Array.isArray(config.roots) ? config.roots : []), defaultProjectsRoot]
+      .filter((item): item is string => typeof item === 'string' && path.isAbsolute(item)).map(item => path.resolve(item)))]
+    workspaceConfigured = config.configured === true
+  }
+} catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
 await app.register(multipart, { limits: { fileSize: 20 * 1024 * 1024, files: 1 } })
 app.setErrorHandler((error, _request, reply) => {
   const err = error as Error & { statusCode?: number }
@@ -535,6 +595,54 @@ app.setErrorHandler((error, _request, reply) => {
 })
 
 app.get('/api/health', async () => ({ ok: true, tectonic: existsSync(tectonicPath), version: '0.1.0' }))
+
+app.get<{ Querystring: { projectId?: string } }>('/api/workspace', async request => ({
+  root: projectsRoot,
+  defaultRoot: defaultProjectsRoot,
+  configured: workspaceConfigured,
+  projectRoot: request.query?.projectId ? projectRoot(request.query.projectId) : null,
+  projectPath: request.query?.projectId ? projectDir(request.query.projectId) : null,
+}))
+app.post<{ Body: { testPath?: string } }>('/api/workspace/select', async request => {
+  const chosen = process.env.TEXLOOM_TEST_FOLDER_PICKER === '1' && request.body?.testPath && path.isAbsolute(request.body.testPath)
+    ? await realpath(request.body.testPath) : await chooseWindowsFolder('workspace')
+  if (!chosen) return { cancelled: true }
+  const details = await lstat(chosen)
+  if (!details.isDirectory() || details.isSymbolicLink()) fail(400, '请选择普通文件夹')
+  const token = randomUUID()
+  folderSelections.set(token, { path: chosen, mode: 'workspace', expires: Date.now() + 10 * 60_000 })
+  return { token, path: chosen }
+})
+app.post<{ Body: { choice: 'current' | 'default' | 'selected'; token?: string } }>('/api/workspace/root', async request => {
+  const choice = request.body?.choice
+  if (!['current', 'default', 'selected'].includes(choice)) fail(400, '根目录选项无效')
+  const chosen = choice === 'current' ? projectsRoot : choice === 'default' ? defaultProjectsRoot : selectedFolder(request.body?.token, 'workspace')
+  const directory = await realpath(chosen)
+  const details = await lstat(directory)
+  if (!details.isDirectory() || details.isSymbolicLink()) fail(400, '根目录不可用')
+  const normalized = (value: string) => process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value)
+  const selected = normalized(directory)
+  const insideApp = path.relative(root, directory)
+  if (selected !== normalized(defaultProjectsRoot) && !insideApp.startsWith('..') && !path.isAbsolute(insideApp)) fail(400, '自定义根目录须位于 TeXloom 源码目录之外，避免项目文件被 Git 跟踪')
+  for (const existing of projectRoots) {
+    const previous = normalized(existing)
+    if (previous === selected) continue
+    const intoExisting = path.relative(previous, directory)
+    const fromExisting = path.relative(directory, previous)
+    if (!(intoExisting.startsWith('..') || path.isAbsolute(intoExisting)) || !(fromExisting.startsWith('..') || path.isAbsolute(fromExisting))) fail(400, '根目录不能包含其他已登记的项目根目录，也不能位于其中')
+  }
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !/^[0-9a-f-]{36}$/.test(entry.name)) continue
+    if (projectRoots.some(existing => normalized(existing) !== selected && existsSync(path.join(existing, entry.name, 'project.json')))) fail(409, `目标目录存在重复项目 ID：${entry.name}`)
+  }
+  const roots = [directory, ...projectRoots.filter(item => normalized(item) !== selected)]
+  await writeWorkspaceConfig(directory, roots, true)
+  projectsRoot = directory
+  projectRoots = roots
+  workspaceConfigured = true
+  if (choice === 'selected' && request.body.token) folderSelections.delete(request.body.token)
+  return { root: projectsRoot, defaultRoot: defaultProjectsRoot, configured: true, projectRoot: null, projectPath: null }
+})
 
 app.get('/api/ai/settings', async () => {
   const settings = await readAiSettings(root)
@@ -612,10 +720,8 @@ app.post<{ Body: { mode: 'chat' | 'translate' | 'polish' | 'explain' | 'rewrite'
 
 app.get('/api/projects', async () => {
   const projects: Project[] = []
-  for (const entry of await readdir(projectsRoot, { withFileTypes: true })) {
-    if (entry.isDirectory() && /^[0-9a-f-]{36}$/.test(entry.name)) {
-      try { projects.push(await projectForList(await getProject(entry.name))) } catch { /* ignore incomplete project */ }
-    }
+  for (const id of await projectIds()) {
+    try { projects.push(await projectForList(await getProject(id))) } catch { /* ignore incomplete project */ }
   }
   return projects.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
 })
@@ -636,9 +742,8 @@ app.patch<{ Params: { name: string }; Body: { name: string } }>('/api/project-ta
   if (!tags.includes(original)) fail(404, '标签不存在')
   if (replacement !== original && tags.includes(replacement)) fail(409, '标签已存在')
   await writeTags(tags.map(item => item === original ? replacement : item))
-  for (const entry of await readdir(projectsRoot, { withFileTypes: true })) {
-    if (!entry.isDirectory() || !/^[0-9a-f-]{36}$/.test(entry.name)) continue
-    const project = await getProject(entry.name)
+  for (const id of await projectIds()) {
+    const project = await getProject(id)
     if (project.tags?.includes(original)) { project.tags = project.tags.map(item => item === original ? replacement : item); await saveProject(project) }
   }
   return { name: replacement }
@@ -648,9 +753,8 @@ app.delete<{ Params: { name: string } }>('/api/project-tags/:name', async reques
   const tags = await readTags()
   if (!tags.includes(name)) fail(404, '标签不存在')
   await writeTags(tags.filter(item => item !== name))
-  for (const entry of await readdir(projectsRoot, { withFileTypes: true })) {
-    if (!entry.isDirectory() || !/^[0-9a-f-]{36}$/.test(entry.name)) continue
-    const project = await getProject(entry.name)
+  for (const id of await projectIds()) {
+    const project = await getProject(id)
     if (project.tags?.includes(name)) { project.tags = project.tags.filter(item => item !== name); await saveProject(project) }
   }
   return { ok: true }
@@ -717,8 +821,10 @@ app.post<{ Body: { token: string } }>('/api/folders/import', async request => {
 
 app.post<{ Body: { token: string; projectIds: string[] } }>('/api/folders/export', async request => {
   const directory = selectedFolder(request.body?.token, 'export')
-  const insideProjects = path.relative(projectsRoot, directory)
-  if (!insideProjects.startsWith('..') && !path.isAbsolute(insideProjects)) fail(400, '导出目标不能位于项目数据目录内')
+  for (const projectDirectory of projectRoots) {
+    const insideProjects = path.relative(projectDirectory, directory)
+    if (!insideProjects.startsWith('..') && !path.isAbsolute(insideProjects)) fail(400, '导出目标不能位于项目数据目录内')
+  }
   if (!Array.isArray(request.body?.projectIds) || !request.body.projectIds.length || request.body.projectIds.length > 30) fail(400, '请选择 1 至 30 个项目')
   const ids = [...new Set(request.body.projectIds)]
   const exported: { id: string; folder: string; files: number }[] = []

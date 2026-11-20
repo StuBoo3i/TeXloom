@@ -7,6 +7,8 @@ import * as pdfjsLib from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, CloudUpload, Code2, Columns2, Download, ExternalLink, File, FilePlus2, FileText, Folder, FolderOpen, GitBranch, Home, LoaderCircle, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Play, Plus, RefreshCw, Save, Search, Settings2, Trash2, Upload, X, ZoomIn, ZoomOut } from 'lucide-react'
 import { Dashboard } from './dashboard'
+import { Landing } from './landing'
+import { WorkspaceRootDialog, type WorkspaceInfo } from './workspace-root'
 import { EditorToolbar, WorkspaceMenuBar, WorkspaceSidebar, type AiOutputView, type AiSettingsView, type GitState, type PanelId, type ReviewThread, type Snapshot } from './workspace-ui'
 import { InsertDialog, type ImageSource, type InsertKind } from './insert-dialog'
 import { ReviewDialog, type ReviewDraft } from './review-dialog'
@@ -142,9 +144,12 @@ function LayoutPicker({ layout, onChoose, onOpenTab }: { layout: Layout; onChoos
   </div>
 }
 
-function App() {
+function App({ onExit }: { onExit: () => void }) {
   const [projects, setProjects] = useState<Project[]>([])
   const [project, setProject] = useState<Project | null>(null)
+  const [workspaceInfo, setWorkspaceInfo] = useState<WorkspaceInfo | null>(null)
+  const [workspaceOpen, setWorkspaceOpen] = useState(false)
+  const [rootDialog, setRootDialog] = useState<'create' | 'change' | null>(null)
   const [files, setFiles] = useState<FileEntry[]>([])
   const [activePath, setActivePath] = useState('')
   const [content, setContent] = useState('')
@@ -197,6 +202,7 @@ function App() {
   const commandRef = useRef<(command: string) => void>(() => {})
   const uploadRef = useRef<HTMLInputElement>(null)
   const importRef = useRef<HTMLInputElement>(null)
+  const workspaceBadgeRef = useRef<HTMLDivElement>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const saveInFlight = useRef<Promise<boolean> | null>(null)
   const autoCompileTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -205,6 +211,18 @@ function App() {
 
   const showError = (error: unknown) => { setNotice(error instanceof Error ? error.message : String(error)); setTimeout(() => setNotice(''), 5500) }
   const refreshProjects = async () => setProjects(await api<Project[]>('/api/projects'))
+  const refreshWorkspace = async (projectId?: string) => {
+    const info = await api<WorkspaceInfo>(`/api/workspace${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`)
+    setWorkspaceInfo(info)
+    return info
+  }
+  async function beginNewProject() {
+    try {
+      const info = await refreshWorkspace()
+      if (!info.configured) setRootDialog('create')
+      else { setModal('project'); setModalValue('') }
+    } catch (error) { showError(error) }
+  }
   const refreshFiles = async (id: string) => {
     const list = await api<FileEntry[]>(`/api/projects/${id}/files`)
     setFiles(list)
@@ -213,8 +231,16 @@ function App() {
 
   useEffect(() => {
     void refreshProjects().catch(showError)
+    void refreshWorkspace().catch(showError)
     void api<{ tectonic: boolean }>('/api/health').then(data => setTectonicReady(data.tectonic)).catch(showError)
     void api<AiSettingsView>('/api/ai/settings').then(setAiSettings).catch(showError)
+  }, [])
+
+  useEffect(() => { void refreshWorkspace(project?.id).catch(showError) }, [project?.id])
+  useEffect(() => {
+    const close = (event: PointerEvent) => { if (!workspaceBadgeRef.current?.contains(event.target as Node)) setWorkspaceOpen(false) }
+    document.addEventListener('pointerdown', close)
+    return () => document.removeEventListener('pointerdown', close)
   }, [])
 
   useEffect(() => {
@@ -888,7 +914,7 @@ function App() {
     }
     switch (command) {
       case 'home': void goHome(); return
-      case 'newProject': setModal('project'); setModalValue(''); return
+      case 'newProject': void beginNewProject(); return
       case 'cloneProject': setModal('clone'); setModalValue(''); return
       case 'importZip': importRef.current?.click(); return
       case 'newFile': setModal('file'); setModalValue(''); return
@@ -926,13 +952,14 @@ function App() {
   commandRef.current = handleCommand
 
   return <div className="app-shell">
-    <header className="topbar"><button className="brand" onClick={() => void goHome()}><span className="brand-mark"><img src="/icon.png" alt="" /></span><span className="brand-name">TeXloom</span></button>{project && <WorkspaceMenuBar onCommand={handleCommand} />}<div className="topbar-right"><span className="local-badge"><span className="local-dot" />本地工作空间</span><a className="top-help" href="https://tectonic-typesetting.github.io/book/latest/" target="_blank" rel="noreferrer"><CircleHelp size={17} />帮助文档</a></div></header>
+    <header className="topbar"><button className="brand" onClick={() => { if (project) void goHome(); else onExit() }}><span className="brand-mark"><img src="/icon.png" alt="" /></span><span className="brand-name">TeXloom</span></button>{project && <WorkspaceMenuBar onCommand={handleCommand} />}<div className="topbar-right"><div className="workspace-location" ref={workspaceBadgeRef}><button className="local-badge" type="button" aria-expanded={workspaceOpen} onClick={() => { setWorkspaceOpen(value => !value); void refreshWorkspace(project?.id).catch(showError) }}><span className="local-dot" />本地工作空间<ChevronDown size={14} /></button>{workspaceOpen && <div className="workspace-location-menu"><h3>项目存储位置</h3>{project && <><label>当前项目文件夹</label><code>{workspaceInfo?.projectPath || '读取中…'}</code></>}<label>{project ? '当前项目所在根目录' : '当前项目根目录'}</label><code>{project ? workspaceInfo?.projectRoot || '读取中…' : workspaceInfo?.root || '读取中…'}</code>{project && workspaceInfo?.projectRoot !== workspaceInfo?.root && <><label>新项目根目录</label><code>{workspaceInfo?.root}</code></>}<p>更换根目录后，新项目保存在新位置；已有项目仍在原位置。</p><button type="button" onClick={() => { setWorkspaceOpen(false); setRootDialog('change') }}><FolderOpen size={15} />修改根目录</button></div>}</div><a className="top-help" href="https://tectonic-typesetting.github.io/book/latest/" target="_blank" rel="noreferrer"><CircleHelp size={17} />帮助文档</a></div></header>
     {project ? <div className="workspace">
       {showSidebar && <WorkspaceSidebar project={project} files={files} activePath={activePath} activePanel={activePanel} outline={outline} searchHits={searchHits} searchBusy={searchBusy} searchError={searchError} reviewThreads={reviewThreads} snapshots={snapshots} gitState={gitState} gitFeedback={gitFeedback} aiSettings={aiSettings} aiOutput={aiOutput} aiBusy={aiBusy} aiError={aiError} editorFontSize={editorFontSize} editorWrap={editorWrap} autoCompile={autoCompile} appearance={appearance} onPanelChange={setActivePanel} onCommand={handleCommand} onOpenFile={file => void openFile(project.id, file)} onDeleteFile={file => void deleteFile(file)} onNavigate={(file, line, column) => void navigateTo(file, line, column)} onSearch={options => void searchProject(options)} onReplaceAll={(replacement, options) => void replaceAllInProject(replacement, options)} onAddReview={openReview} onReviewAction={(id, action, body) => void reviewAction(id, action, body)} onCreateSnapshot={note => void createProjectSnapshot(note)} onRestoreSnapshot={id => void restoreProjectSnapshot(id)} onGitAction={gitAction} onGitBranchChange={changeGitBranch} onReviewReload={reloadReview} onAiRequest={(mode, prompt) => void requestAi(mode, prompt)} onAiApply={() => setAiDiffOpen(true)} onAiCancel={() => aiController.current?.abort()} onSaveAiSettings={settings => void saveAiSettings(settings)} onEditorPreferences={changeEditorPreferences} onAutoCompile={changeAutoCompile} onAppearanceChange={changeAppearance} />}
       <main className="work-main"><div className="workspace-toolbar"><div className="crumbs">{!showSidebar && <button className="icon-button" onClick={() => setShowSidebar(true)} title="展开侧边栏"><PanelLeftOpen size={18} /></button>}<span>{project.name}</span><ChevronRight size={15} /><strong>{activePath || project.mainFile}</strong></div><div className="workspace-actions"><LayoutPicker layout={layout} onChoose={chooseLayout} onOpenTab={openPdfTab} /><span className="save-state">{saving ? <><LoaderCircle size={14} className="spin" />保存中</> : dirty ? <><span className="unsaved-dot" />未保存</> : <><Save size={14} />已保存</>}</span><button className="soft-button" onClick={() => void saveCurrent()}><Save size={15} />保存</button><button className={`auto-button ${autoCompile ? 'on' : ''}`} onClick={() => changeAutoCompile(!autoCompile)} title={`自动编译：${autoCompile ? '开启' : '关闭'}`} aria-label={`自动编译：${autoCompile ? '开启' : '关闭'}`}><RefreshCw size={16} /></button><button className="primary-button" onClick={() => void compile()} disabled={busy || !tectonicReady}>{busy ? <LoaderCircle size={16} className="spin" /> : <Play size={16} fill="currentColor" />}{busy ? '编译中' : '编译 PDF'}</button></div></div><div ref={splitRef} className={`editor-preview layout-${layout}`} style={{ '--editor-percent': `${splitPercent}%` } as React.CSSProperties}><section className="editor-pane"><div className="pane-title"><div className="pane-title-label"><Code2 size={17} /><strong>源文件</strong><span className="pane-subtitle">{activePath}</span></div><span className="editor-type">{activePath.endsWith('.tex') ? 'LaTeX' : '文本'}</span></div><EditorToolbar onCommand={handleCommand} /><div className="editor-wrap"><Editor path={activePath} language={activePath.endsWith('.tex') ? latexLanguageId : 'plaintext'} value={content} onChange={value => setContent(value ?? '')} beforeMount={beforeEditorMount} onMount={onEditorMount} theme={latexThemeName(appearance.theme)} options={{ fontSize: Math.round(editorFontSize * appearance.size / 14), lineHeight: Math.round(24 * appearance.size / 14), minimap: { enabled: false }, wordWrap: editorWrap, automaticLayout: true, scrollBeyondLastLine: false, padding: { top: 18 }, fontFamily: fontFamilies[appearance.font], renderLineHighlight: 'line', lineNumbersMinChars: 3 }} /></div></section><div className="pane-resizer" role="separator" aria-label="调整编辑器与 PDF 宽度" aria-orientation="vertical" aria-valuemin={20} aria-valuemax={80} aria-valuenow={splitPercent} tabIndex={layout === 'split' ? 0 : -1} onPointerDown={resizeSplit} onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) updateSplit(event.clientX) }} onPointerUp={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) { persistSplit(updateSplit(event.clientX)); event.currentTarget.releasePointerCapture(event.pointerId) } }} onKeyDown={event => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); const value = Math.max(20, Math.min(80, splitPercent + (event.key === 'ArrowLeft' ? -2 : 2))); setSplitPercent(value); persistSplit(value) } }} onDoubleClick={() => { setSplitPercent(50); persistSplit(50) }} /><PdfPreview projectId={project.id} version={pdfVersion} target={pdfTarget} onReverse={syncPdfToSource} /></div><div className={`log-panel ${showLogs ? 'open' : ''}`}><button className="log-heading" onClick={() => setShowLogs(!showLogs)}><div><span className={`compile-indicator ${job?.status || ''}`} />编译日志{job && <span className="log-status">{job.status === 'running' ? '正在编译' : job.status === 'success' ? '编译成功' : '编译失败'}</span>}</div><ChevronDown size={16} className={showLogs ? 'flip' : ''} /></button>{showLogs && <pre>{job?.log || (busy ? '正在启动 Tectonic…' : '暂无编译记录')}</pre>}</div></main>
-    </div> : <Dashboard projects={projects} onOpen={item => void openProject(item)} onRefresh={refreshProjects} onCreate={() => { setModal('project'); setModalValue('') }} onImportZip={() => importRef.current?.click()} onClone={() => { setModal('clone'); setModalValue('') }} />}
+    </div> : <Dashboard projects={projects} onOpen={item => void openProject(item)} onRefresh={refreshProjects} onCreate={() => void beginNewProject()} onImportZip={() => importRef.current?.click()} onClone={() => { setModal('clone'); setModalValue('') }} />}
 
     <input ref={uploadRef} type="file" hidden onChange={event => { const file = event.target.files?.[0]; if (file) void upload(file); event.target.value = '' }} /><input ref={importRef} type="file" accept=".zip" hidden onChange={event => { const file = event.target.files?.[0]; if (file) void importZip(file); event.target.value = '' }} />
+    {rootDialog && workspaceInfo && <WorkspaceRootDialog info={workspaceInfo} firstProject={rootDialog === 'create'} onClose={() => setRootDialog(null)} onConfigured={() => { const action = rootDialog; setRootDialog(null); void refreshWorkspace(project?.id).catch(showError); void refreshProjects().catch(showError); if (action === 'create') { setModal('project'); setModalValue('') } }} />}
     {notice && <div role="alert" className="notice"><CircleHelp size={17} />{notice}<button onClick={() => setNotice('')}><X size={16} /></button></div>}
     {modal && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setModal(null) }}><form className="modal" onSubmit={event => { event.preventDefault(); void submitModal() }}><div className="modal-icon">{modal === 'project' ? <BookOpen size={23} /> : modal === 'clone' ? <GitBranch size={23} /> : <FilePlus2 size={23} />}</div><h2>{modal === 'project' ? '新建 LaTeX 项目' : modal === 'clone' ? '导入 GitHub 私有仓库' : '新建文件'}</h2><p>{modal === 'project' ? '创建一个新的本地工作空间，开始编写文档。' : modal === 'clone' ? '输入仓库地址。首次连接会打开系统 GitHub 登录，完成后自动导入。' : '输入文件路径，例如 chapter/intro.tex。'}</p><label>{modal === 'project' ? '项目名称' : modal === 'clone' ? 'GitHub 仓库地址' : '文件路径'}<input autoFocus value={modalValue} onChange={event => setModalValue(event.target.value)} placeholder={modal === 'project' ? '例如：研究论文' : modal === 'clone' ? 'https://github.com/owner/private-repo' : '例如：chapter/intro.tex'} /></label><div className="modal-actions"><button type="button" className="outline-button" onClick={() => setModal(null)}>取消</button><button type="submit" className="primary-button" disabled={!modalValue.trim() || modalBusy}>{modalBusy ? '连接中…' : modal === 'clone' ? '连接并导入' : '创建'}</button></div></form></div>}
     {insertDialog && project && <InsertDialog kind={insertDialog.kind} initialSource={insertDialog.source} initialSymbolGroup={insertDialog.symbolGroup} initialTableMode={insertDialog.tableMode} selectedText={selectedText} references={references} citations={citations} imageFiles={files.filter(file => file.type === 'file' && /\.(png|jpe?g|pdf)$/i.test(file.path)).map(file => file.path)} projects={projects} currentProjectId={project.id} onClose={() => { setInsertDialog(null); pendingSelection.current = null }} onInsert={insertFromDialog} onUploadImage={uploadInsertImage} onCopyImage={copyInsertImage} onImportImageUrl={importInsertImageUrl} onListProjectFiles={async id => (await api<FileEntry[]>(`/api/projects/${id}/files`)).filter(file => file.type === 'file' && /\.(png|jpe?g|pdf)$/i.test(file.path)).map(file => file.path)} onImageTableAi={file => void recognizeTableImage(file)} />}
@@ -959,4 +986,21 @@ function StandalonePdf({ projectId }: { projectId: string }) {
 
 const params = new URLSearchParams(window.location.search)
 const pdfProject = params.get('view') === 'pdf' ? params.get('project') : null
-createRoot(document.getElementById('root')!).render(pdfProject ? <StandalonePdf projectId={pdfProject} /> : <App />)
+
+function ProductRouter() {
+  const [page, setPage] = useState<'landing' | 'workspace'>(() => new URLSearchParams(window.location.search).get('view') === 'workspace' ? 'workspace' : 'landing')
+  useEffect(() => {
+    const update = () => setPage(new URLSearchParams(window.location.search).get('view') === 'workspace' ? 'workspace' : 'landing')
+    window.addEventListener('popstate', update)
+    return () => window.removeEventListener('popstate', update)
+  }, [])
+  useEffect(() => { document.title = page === 'landing' ? 'TeXloom · 让研究成为主角' : 'TeXloom · 本地 LaTeX 工作台' }, [page])
+  function navigate(next: 'landing' | 'workspace') {
+    window.history.pushState({}, '', next === 'landing' ? '/' : '/?view=workspace')
+    setPage(next)
+    window.scrollTo({ top: 0, behavior: 'instant' })
+  }
+  return page === 'landing' ? <Landing onEnter={() => navigate('workspace')} /> : <App onExit={() => navigate('landing')} />
+}
+
+createRoot(document.getElementById('root')!).render(pdfProject ? <StandalonePdf projectId={pdfProject} /> : <ProductRouter />)
