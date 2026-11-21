@@ -195,12 +195,12 @@ export function VisualEditor({ source, projectId, file, assetPath, draftCards, o
     if (blocks.length) onViewport(Number(blocks[0].dataset.blockStart))
   }
   const renderInline = (nodes: InlineNode[] | undefined) => nodes?.map((node, index) => <Inline key={index} node={node} source={source} onEdit={onEdit} onFocus={onFocus} onBlur={onBlur} />)
-  const captureSelection = () => {
+  const selectedSourceSpan = (): SourceSpan | null => {
     const selection = window.getSelection()
     const host = root.current
-    if (!selection?.rangeCount || !host) return false
+    if (!selection?.rangeCount || !host) return null
     const range = selection.getRangeAt(0)
-    if (!host.contains(range.startContainer) || !host.contains(range.endContainer)) return false
+    if (!host.contains(range.startContainer) || !host.contains(range.endContainer)) return null
     const offset = (node: Node, at: number, endBoundary: boolean) => {
       const element = node instanceof Element ? node : node.parentElement
       let item = element?.closest<HTMLElement>('[data-source-start]')
@@ -230,11 +230,40 @@ export function VisualEditor({ source, projectId, file, assetPath, draftCards, o
     try {
       const start = offset(range.startContainer, range.startOffset, false)
       const end = offset(range.endContainer, range.endOffset, true)
-      if (!Number.isFinite(start) || !Number.isFinite(end)) return false
-      onSelection({ start: Math.min(start, end), end: Math.max(start, end) })
-      return true
-    } catch { return false /* ignore transient DOM selection */ }
+      if (!Number.isFinite(start) || !Number.isFinite(end)) return null
+      return { start: Math.min(start, end), end: Math.max(start, end) }
+    } catch { return null /* ignore transient DOM selection */ }
   }
+  const captureSelection = () => {
+    const span = selectedSourceSpan()
+    if (span) onSelection(span)
+    return Boolean(span)
+  }
+  useEffect(() => {
+    const deleteSelection = (event: KeyboardEvent) => {
+      if ((event.key !== 'Backspace' && event.key !== 'Delete') || event.altKey || event.ctrlKey || event.metaKey || event.isComposing) return
+      const selection = window.getSelection()
+      const host = root.current
+      if (!selection?.rangeCount || selection.isCollapsed || !host) return
+      const range = selection.getRangeAt(0)
+      if (!host.contains(range.startContainer) || !host.contains(range.endContainer)) return
+      const target = event.target
+      if (!(target instanceof Node) || !host.contains(target)) return
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLButtonElement) return
+      const editable = (node: Node) => (node instanceof Element ? node : node.parentElement)?.closest<HTMLElement>('.visual-editable')
+      const first = editable(range.startContainer)
+      if (first && first === editable(range.endContainer) && first.isContentEditable) return
+      const span = selectedSourceSpan()
+      if (!span || span.end <= span.start) return
+      event.preventDefault()
+      event.stopPropagation()
+      selection.removeAllRanges()
+      onEdit(span, source.slice(span.start, span.end), '')
+      onSelection({ start: span.start, end: span.start })
+    }
+    window.document.addEventListener('keydown', deleteSelection, true)
+    return () => window.document.removeEventListener('keydown', deleteSelection, true)
+  }, [source, onEdit, onSelection])
   const renderBlock = (block: VisualBlock, index: number): ReactNode => {
     if (block.kind === 'blank' && block.content) return <div key={index} className="visual-blank-line" data-block-start={block.start} data-block-end={block.end}><Editable className="visual-blank-editable" span={block.content} raw={source.slice(block.content.start, block.content.end)} commitOnBlur onEdit={onEdit} onFocus={onFocus} onBlur={onBlur} onDeleteEmpty={() => onEdit(block, block.raw, '')} /></div>
     if (block.kind === 'source') return <SourceBlock key={`${index}-source`} block={block} onEdit={onEdit} />
@@ -252,13 +281,13 @@ export function VisualEditor({ source, projectId, file, assetPath, draftCards, o
     if (block.kind === 'list') { const items = block.items?.map((item, itemIndex) => <li key={itemIndex}>{renderInline(item.children)}</li>); return block.level ? <ol key={index} className="visual-list" data-block-start={block.start} data-block-end={block.end}>{items}</ol> : <ul key={index} className="visual-list" data-block-start={block.start} data-block-end={block.end}>{items}</ul> }
     return null
   }
-  return <div ref={root} className="visual-editor" onScroll={() => { if (scrollFrame.current) return; scrollFrame.current = requestAnimationFrame(() => { scrollFrame.current = 0; reportViewport() }) }} onPointerDownCapture={() => {
+  return <div ref={root} className="visual-editor" tabIndex={-1} onScroll={() => { if (scrollFrame.current) return; scrollFrame.current = requestAnimationFrame(() => { scrollFrame.current = 0; reportViewport() }) }} onPointerDownCapture={() => {
     const active = window.document.activeElement
     if (active instanceof HTMLElement && active.classList.contains('visual-editable') && root.current?.contains(active)) {
       active.contentEditable = 'false'
       active.blur()
     }
-  }} onPointerUp={event => { const block = (event.target as HTMLElement).closest<HTMLElement>('[data-block-start]'); queueMicrotask(() => { if (!captureSelection() && block) onSelection({ start: Number(block.dataset.blockStart), end: Number(block.dataset.blockStart) }) }) }} onKeyUp={captureSelection} onFocusCapture={() => queueMicrotask(captureSelection)} onKeyDown={event => {
+  }} onPointerUp={event => { const block = (event.target as HTMLElement).closest<HTMLElement>('[data-block-start]'); queueMicrotask(() => { if (!captureSelection() && block) onSelection({ start: Number(block.dataset.blockStart), end: Number(block.dataset.blockStart) }); const selection = window.getSelection(); if (selection && !selection.isCollapsed && root.current && !root.current.contains(window.document.activeElement)) root.current.focus({ preventScroll: true }) }) }} onKeyUp={captureSelection} onFocusCapture={() => queueMicrotask(captureSelection)} onKeyDown={event => {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); (event.target as HTMLElement).blur(); onUndo() }
     if ((event.ctrlKey || event.metaKey) && (event.key.toLowerCase() === 'y' || (event.shiftKey && event.key.toLowerCase() === 'z'))) { event.preventDefault(); (event.target as HTMLElement).blur(); onRedo() }
   }}>

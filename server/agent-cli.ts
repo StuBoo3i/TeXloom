@@ -1,19 +1,21 @@
 import { spawn, type ChildProcessWithoutNullStreams, type SpawnOptionsWithoutStdio } from 'node:child_process'
 import { rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { readCodexAccount, type CodexAccount } from './codex-account.js'
 
 export type AgentProviderId = 'codex' | 'claude' | 'gemini' | 'doubao'
 export type AgentMode = 'review' | 'edit'
-export type AgentChange = { path: string; beforeHash: string; before: string; after: string }
-export type AgentEvent = { type: 'thread' | 'text' | 'tool' | 'error' | 'done'; text?: string; threadId?: string }
+export type AgentChange = { path: string; kind: 'created' | 'modified' | 'deleted'; beforeHash?: string; afterHash?: string; beforeSize: number; afterSize: number; binary: boolean; before?: string; after?: string }
+export type AgentEvent = { type: 'thread' | 'text' | 'tool' | 'error' | 'failed' | 'done'; text?: string; threadId?: string }
 export type AgentRunOptions = { cwd: string; prompt: string; threadId?: string; mode: AgentMode; env: NodeJS.ProcessEnv; model: string; effort: string; timeoutSeconds: number; signal?: AbortSignal; onEvent: (event: AgentEvent) => void }
+export type AgentStatus = { installed: boolean; authenticated: boolean; detail: string; account?: CodexAccount }
 
 export interface CliAgentProvider {
   id: AgentProviderId
   label: string
-  status(env: NodeJS.ProcessEnv, keyConfigured?: boolean): Promise<{ installed: boolean; authenticated: boolean; detail: string }>
+  status(env: NodeJS.ProcessEnv, keyConfigured?: boolean): Promise<AgentStatus>
   login(env: NodeJS.ProcessEnv): void
-  run(options: AgentRunOptions): Promise<{ threadId?: string; text: string; code: number }>
+  run(options: AgentRunOptions): Promise<{ threadId?: string; text: string; code: number; error?: string }>
 }
 
 function spawnCli(command: string, args: string[], options: SpawnOptionsWithoutStdio): ChildProcessWithoutNullStreams {
@@ -41,9 +43,25 @@ export function codexEvent(value: unknown): AgentEvent | null {
   if (item.type === 'thread.started' && item.thread_id) return { type: 'thread', threadId: item.thread_id }
   if (item.type === 'item.completed' && item.item?.type === 'agent_message' && item.item.text) return { type: 'text', text: item.item.text }
   if (item.type === 'item.started' && item.item?.type === 'command_execution' && item.item.command) return { type: 'tool', text: item.item.command }
-  if (item.type === 'turn.failed' || item.type === 'error') return { type: 'error', text: item.error?.message || item.message || 'Codex 运行失败' }
+  if (item.type === 'turn.failed') return { type: 'failed', text: item.error?.message || item.message || 'Codex 运行失败' }
+  if (item.type === 'error') return { type: 'error', text: item.error?.message || item.message || 'Codex 连接异常' }
   if (item.type === 'turn.completed') return { type: 'done' }
   return null
+}
+
+export function codexRunOutcome(exitCode: number | null, completed: boolean, failure: string, lastError: string, stderr: string): { code: number; error?: string } {
+  if (exitCode === 0 && completed && !failure) return { code: 0 }
+  const diagnostic = stderr.split(/\r?\n/).filter(line => !line.includes('Shell snapshot not supported yet for PowerShell') && !line.includes('codex_skills::interface: ignoring')).join('\n').trim()
+  return { code: exitCode || -1, error: failure || lastError || diagnostic || (completed ? 'Codex CLI 运行失败' : 'Codex CLI 未收到完成事件，回复可能不完整') }
+}
+
+export function codexRunArgs(cwd: string, threadId: string | undefined, model: string, effort: string): string[] {
+  const options = ['--skip-git-repo-check', '--json']
+  if (model) options.push('--model', model)
+  if (effort !== 'auto') options.push('-c', `model_reasoning_effort="${effort}"`)
+  return threadId
+    ? ['-C', cwd, '-s', 'workspace-write', '-a', 'never', 'exec', 'resume', ...options, threadId, '-']
+    : ['-C', cwd, '-s', 'workspace-write', '-a', 'never', 'exec', ...options, '-']
 }
 
 export const codexProvider: CliAgentProvider = {
@@ -52,42 +70,42 @@ export const codexProvider: CliAgentProvider = {
     const version = await runFixed('codex', ['--version'], env)
     if (version.code !== 0) return { installed: false, authenticated: false, detail: '未找到 codex 命令，请先安装 Codex CLI' }
     const login = await runFixed('codex', ['login', 'status'], env)
-    return { installed: true, authenticated: login.code === 0, detail: login.code === 0 ? login.output : '尚未登录 Codex CLI' }
+    const account = login.code === 0 && /using ChatGPT/i.test(login.output) ? await readCodexAccount(env) : undefined
+    return { installed: true, authenticated: login.code === 0, detail: login.code === 0 ? login.output : '尚未登录 Codex CLI', ...(account ? { account } : {}) }
   },
   login(env) {
     if (process.platform !== 'win32') throw new Error('系统终端登录当前仅支持 Windows')
     const child = spawn('powershell.exe', ['-NoExit', '-NoProfile', '-Command', 'codex login'], { shell: false, detached: true, windowsHide: false, stdio: 'ignore', env })
     child.unref()
   },
-  run({ cwd, prompt, threadId, mode, env, model, effort, timeoutSeconds, signal, onEvent }) {
+  run({ cwd, prompt, threadId, env, model, effort, timeoutSeconds, signal, onEvent }) {
     return new Promise((resolve, reject) => {
-      const config = ['-c', 'approval_policy="never"', '--ignore-user-config', '--skip-git-repo-check', '--json']
-      if (model) config.push('--model', model)
-      if (effort !== 'auto') config.push('-c', `model_reasoning_effort="${effort}"`)
-      const sandbox = mode === 'edit' ? 'workspace-write' : 'read-only'
-      const args = threadId
-        ? ['exec', 'resume', ...config, '-c', `sandbox_mode="${sandbox}"`, threadId, '-']
-        : ['exec', ...config, '--sandbox', sandbox, '-C', cwd, '-']
+      const args = codexRunArgs(cwd, threadId, model, effort)
       const child: ChildProcessWithoutNullStreams = spawn('codex', args, { cwd, shell: false, windowsHide: true, env, stdio: ['pipe', 'pipe', 'pipe'] })
       let buffer = ''; let stderr = ''; let answer = ''; let currentThread = threadId; let settled = false
+      let completed = false; let failure = ''; let lastError = ''; let timedOut = false
       const finishError = (error: Error) => { if (!settled) { settled = true; reject(error) } }
-      const timer = setTimeout(() => child.kill(), timeoutSeconds * 1000)
+      const timer = timeoutSeconds > 0 ? setTimeout(() => { timedOut = true; child.kill() }, timeoutSeconds * 1000) : undefined
       signal?.addEventListener('abort', () => child.kill(), { once: true })
       child.stdin.end(prompt)
+      const handleLine = (line: string) => {
+        if (!line.trim()) return
+        try {
+          const event = codexEvent(JSON.parse(line))
+          if (!event) return
+          if (event.type === 'thread') currentThread = event.threadId
+          if (event.type === 'text') answer = event.text ?? ''
+          if (event.type === 'done') completed = true
+          if (event.type === 'failed') failure = event.text || 'Codex 运行失败'
+          if (event.type === 'error') lastError = event.text || 'Codex 连接异常'
+          onEvent(event)
+        } catch { /* ignore non-JSON diagnostics */ }
+      }
       child.stdout.on('data', (chunk: Buffer) => {
         buffer += chunk.toString('utf8')
         const lines = buffer.split(/\r?\n/)
         buffer = lines.pop() ?? ''
-        for (const line of lines) {
-          if (!line.trim()) continue
-          try {
-            const event = codexEvent(JSON.parse(line))
-            if (!event) continue
-            if (event.type === 'thread') currentThread = event.threadId
-            if (event.type === 'text') answer = event.text ?? ''
-            onEvent(event)
-          } catch { /* ignore non-JSON diagnostics */ }
-        }
+        for (const line of lines) handleLine(line)
       })
       child.stderr.on('data', (chunk: Buffer) => { stderr = (stderr + chunk.toString('utf8')).slice(-2000) })
       child.once('error', error => { clearTimeout(timer); finishError(error) })
@@ -95,7 +113,11 @@ export const codexProvider: CliAgentProvider = {
         clearTimeout(timer)
         if (settled) return
         settled = true
-        resolve({ code: code ?? -1, text: answer.trim() || stderr.trim(), threadId: currentThread })
+        handleLine(buffer)
+        const outcome = timedOut
+          ? { code: -1, error: `Codex CLI 已达到 ${timeoutSeconds} 秒运行上限并停止；本轮回复与文件修改可能尚未完成。` }
+          : codexRunOutcome(code, completed, failure, lastError, stderr)
+        resolve({ ...outcome, text: answer.trim(), threadId: currentThread })
       })
     })
   },
@@ -105,7 +127,7 @@ function runStructured(command: string, args: string[], { cwd, prompt, threadId,
   return new Promise((resolve, reject) => {
     const child = spawnCli(command, args, { cwd, windowsHide: true, env })
     let buffer = ''; let stderr = ''; let answer = ''; let currentThread = threadId; let settled = false
-    const timer = setTimeout(() => child.kill(), timeoutSeconds * 1000)
+    const timer = timeoutSeconds > 0 ? setTimeout(() => child.kill(), timeoutSeconds * 1000) : undefined
     signal?.addEventListener('abort', () => child.kill(), { once: true })
     child.stdin.end(prompt)
     child.stdout.on('data', (chunk: Buffer) => {
@@ -210,7 +232,7 @@ export const doubaoProvider: CliAgentProvider = {
         const child = spawnCli('doubao', ['-p', '请读取当前目录的 .texloom-agent-request.txt，并按其中的用户要求完成任务。'], { cwd: options.cwd, windowsHide: true, env: options.env })
         child.stdin.end()
         let stdout = ''; let stderr = ''; let settled = false
-        const timer = setTimeout(() => child.kill(), options.timeoutSeconds * 1000)
+        const timer = options.timeoutSeconds > 0 ? setTimeout(() => child.kill(), options.timeoutSeconds * 1000) : undefined
         options.signal?.addEventListener('abort', () => child.kill(), { once: true })
         child.stdout.on('data', (chunk: Buffer) => { stdout = (stdout + chunk.toString('utf8')).slice(-100000) })
         child.stderr.on('data', (chunk: Buffer) => { stderr = (stderr + chunk.toString('utf8')).slice(-3000) })

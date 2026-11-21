@@ -1,6 +1,6 @@
 import type { AgentChange, AgentProviderId } from './agent-cli.js'
 
-export type AgentMessage = { id: number; role: 'user' | 'assistant' | 'system'; text: string; at: string; provider: AgentProviderId; profileId: string; model?: string }
+export type AgentMessage = { id: number; role: 'user' | 'assistant' | 'system'; text: string; at: string; provider: AgentProviderId; profileId: string; model?: string; status?: 'partial' }
 export type AgentLane = { provider: AgentProviderId; profileId: string; threadId?: string; lastSeen: number }
 export type AgentSession = { schemaVersion: 2; messages: AgentMessage[]; lanes: Record<string, AgentLane>; pending: AgentChange[]; pendingLane?: string; updatedAt: string }
 
@@ -16,6 +16,7 @@ export function normalizeAgentSession(raw: unknown): AgentSession {
     provider: ['codex', 'claude', 'gemini', 'doubao'].includes(value.provider) ? value.provider as AgentProviderId : 'codex',
     profileId: typeof value.profileId === 'string' ? value.profileId : 'codex-default',
     ...(typeof value.model === 'string' ? { model: value.model } : {}),
+    ...(value.status === 'partial' ? { status: 'partial' as const } : {}),
   }))
   const lanes: Record<string, AgentLane> = {}
   if (item.schemaVersion === 2 && item.lanes && typeof item.lanes === 'object') {
@@ -36,7 +37,7 @@ export function sharedAgentContext(session: AgentSession, key: string, maxTurns:
   let budget = 12000
   const lines: string[] = []
   for (const message of [...recent].reverse()) {
-    const line = `[${message.provider}/${message.profileId} · ${message.role}] ${message.text.slice(0, 3000)}`
+    const line = `[${message.provider}/${message.profileId} · ${message.role}${message.status === 'partial' ? ' · 未完成' : ''}] ${message.text.slice(0, 3000)}`
     if (line.length > budget) break
     budget -= line.length
     lines.unshift(line)

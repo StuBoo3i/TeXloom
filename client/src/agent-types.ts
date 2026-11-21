@@ -10,10 +10,10 @@ export type AgentProfile = {
   contextTurns: number
   shareContext: boolean
   keyConfigured: boolean
-  status: { installed: boolean; authenticated: boolean; detail: string }
+  status: { installed: boolean; authenticated: boolean; detail: string; account?: { name?: string; email?: string } }
 }
-export type AgentChange = { path: string; beforeHash: string; before: string; after: string }
-export type AgentMessage = { id: number; role: 'user' | 'assistant' | 'system'; text: string; at: string; provider: AgentProviderId; profileId: string; model?: string }
+export type AgentChange = { path: string; kind: 'created' | 'modified' | 'deleted'; beforeHash?: string; afterHash?: string; beforeSize: number; afterSize: number; binary: boolean; before?: string; after?: string }
+export type AgentMessage = { id: number; role: 'user' | 'assistant' | 'system'; text: string; at: string; provider: AgentProviderId; profileId: string; model?: string; status?: 'partial' }
 export type AgentSession = { schemaVersion: 2; messages: AgentMessage[]; pending: AgentChange[]; pendingLane?: string; running: boolean }
 export const providerLabels: Record<AgentProviderId, string> = { codex: 'Codex CLI', claude: 'Claude Code', gemini: 'Gemini CLI', doubao: '豆包 CLI' }
 

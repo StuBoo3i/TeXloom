@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { agentApi, providerLabels, type AgentProfile, type AgentProviderId } from './agent-types'
+import './agent-profile-settings.css'
 
 export function AgentProfileSettings({ projectId }: { projectId: string }) {
   const [profiles, setProfiles] = useState<AgentProfile[]>([])
@@ -48,13 +49,15 @@ export function AgentProfileSettings({ projectId }: { projectId: string }) {
   return <div className="agent-profile-settings">
     <strong>Agent CLI 账号</strong>
     <p>每个项目共用一份对话记录；不同服务商和账号保留各自的原生会话。</p>
-    <label>当前账号<select value={draft?.id || ''} onChange={event => select(event.target.value)}>{profiles.map(item => <option value={item.id} key={item.id}>{providerLabels[item.provider]} · {item.label}</option>)}</select></label>
+    <label>当前账号<select value={draft?.id || ''} onChange={event => select(event.target.value)}>{profiles.map(item => <option value={item.id} key={item.id}>{providerLabels[item.provider]} · {item.label}{item.provider === 'codex' && item.status.account?.email ? ` · ${item.status.account.email}` : ''}</option>)}</select></label>
     {draft && <div className="agent-profile-editor">
       <p className={draft.status.installed ? 'agent-ready' : 'agent-offline'}>{draft.status.detail}</p>
-      <label>账号名称<input value={draft.label} onChange={event => change({ label: event.target.value })}/></label>
+      {draft.provider === 'codex' && <div className="agent-login-identity"><strong>Codex CLI 当前登录账号</strong>{draft.status.account ? <><span>{draft.status.account.name || draft.status.account.email}</span>{draft.status.account.name && draft.status.account.email && <small>{draft.status.account.email}</small>}</> : <span>{draft.status.authenticated ? '已登录，但本机凭据未提供可识别的账号名称或邮箱' : '未登录'}</span>}<small>登录身份由 Codex CLI 管理，刷新状态后更新。</small></div>}
+      <label>账号备注名称<input value={draft.label} onChange={event => change({ label: event.target.value })}/></label>
       <label>模型 ID<input value={draft.model} disabled={draft.provider === 'doubao'} onChange={event => change({ model: event.target.value })} placeholder={draft.provider === 'doubao' ? '由豆包 CLI 管理' : '留空使用 CLI 默认模型'}/></label>
       <label>智能程度<select value={draft.effort} disabled={draft.provider === 'gemini' || draft.provider === 'doubao'} onChange={event => change({ effort: event.target.value as AgentProfile['effort'] })}><option value="auto">自动</option><option value="low">低</option><option value="medium">中</option><option value="high">高</option>{draft.provider === 'codex' && <option value="xhigh">极高</option>}</select></label>
-      <label>运行超时（秒）<input type="number" min={30} max={600} value={draft.timeoutSeconds} onChange={event => change({ timeoutSeconds: Number(event.target.value) })}/></label>
+      <label className="settings-checkbox"><input type="checkbox" checked={draft.timeoutSeconds === 0} onChange={event => change({ timeoutSeconds: event.target.checked ? 0 : 600 })}/>不限制单轮运行时间</label>
+      {draft.timeoutSeconds > 0 && <label>运行超时（秒）<input type="number" min={30} max={3600} value={draft.timeoutSeconds} onChange={event => change({ timeoutSeconds: Number(event.target.value) })}/></label>}
       <label className="settings-checkbox"><input type="checkbox" checked={draft.shareContext} onChange={event => change({ shareContext: event.target.checked })}/>向此账号提供其他 Agent 的项目对话</label>
       {draft.shareContext && <label>共享最近轮数<input type="number" min={0} max={30} value={draft.contextTurns} onChange={event => change({ contextTurns: Number(event.target.value) })}/></label>}
       {draft.provider === 'claude' && <><label>Anthropic API Key<input type="password" autoComplete="off" value={apiKey} onChange={event => setApiKey(event.target.value)} placeholder={draft.keyConfigured ? '已保存；留空保持不变' : '填写此账号的密钥'}/></label>{draft.keyConfigured && <button onClick={() => void save(true)}>清除已存密钥</button>}</>}

@@ -1,0 +1,21 @@
+.agent-login-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px;
+  border: 1px solid var(--theme-border, #dce5ee);
+  border-radius: 7px;
+  background: var(--theme-accent-soft, #eaf3fa);
+  overflow-wrap: anywhere;
+}
+
+.agent-login-identity strong {
+  font-size: 11px;
+  color: var(--theme-accent-strong, #286595);
+}
+
+.agent-login-identity span {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--theme-text, #294d6a);
+}

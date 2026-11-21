@@ -19,10 +19,11 @@ import { windowsHttpsProxy } from './windows-proxy.js'
 import { foldReviewEvents, makeReviewEvent, readReviewEvents, writeReviewEvent, type ReviewEvent, type ReviewThread } from './review-events.js'
 import { localPackageAdvice, packageCatalog, packageInsertion, validateAiAdvice } from './package-advice.js'
 import { draftSource } from './draft-compile.js'
-import { agentProviders, type AgentChange, type AgentMode, type AgentProviderId } from './agent-cli.js'
+import { agentProviders, type AgentMode, type AgentProviderId } from './agent-cli.js'
 import { agentProfileEnvironment, agentProfileView, newAgentProfile, readAgentConfig, writeAgentConfig, type AgentProfile } from './agent-config.js'
 import { appendAgentMessage, laneKey, normalizeAgentSession, sharedAgentContext, type AgentSession } from './agent-session.js'
 import { applySuggestedEdits, parseSuggestedEdits } from './agent-edits.js'
+import { applyAgentChanges, collectAgentChanges, createAgentWorkspace, hashBytes, readWorkspaceFile, workspaceFile, workspacePaths } from './agent-workspace.js'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const defaultProjectsRoot = path.join(root, 'projects')
@@ -44,6 +45,7 @@ const activeCardPreviews = new Set<string>()
 const reviewLocks = new Map<string, Promise<void>>()
 const folderSelections = new Map<string, { path: string; mode: 'import' | 'export' | 'workspace'; expires: number }>()
 const activeAgentProjects = new Set<string>()
+const agentApplyingProjects = new Set<string>()
 
 async function withReviewLock<T>(id: string, action: () => Promise<T>): Promise<T> {
   const previous = reviewLocks.get(id) ?? Promise.resolve()
@@ -1043,7 +1045,10 @@ app.patch<{ Params: { id: string }; Body: { name?: string; mainFile?: string; sh
 app.delete<{ Params: { id: string } }>('/api/projects/:id', async request => {
   await getProject(request.params.id)
   if (activeProjects.has(request.params.id)) fail(409, '项目正在编译')
+  if (activeAgentProjects.has(request.params.id) || agentApplyingProjects.has(request.params.id)) fail(409, '请先结束此项目正在运行的 Agent')
   await rm(projectDir(request.params.id), { recursive: true, force: true })
+  await rm(agentStage(request.params.id), { recursive: true, force: true })
+  await rm(agentSessionFile(request.params.id), { force: true })
   return { ok: true }
 })
 
@@ -1080,6 +1085,7 @@ app.get<{ Params: { id: string }; Querystring: { path: string } }>('/api/project
 })
 app.put<{ Params: { id: string }; Querystring: { path: string }; Body: { content: string } }>('/api/projects/:id/file', async request => {
   const project = await getProject(request.params.id)
+  if (agentApplyingProjects.has(project.id)) fail(409, 'Agent 修改正在应用，请稍后保存')
   const file = await safeFile(project.id, request.query.path)
   if (typeof request.body?.content !== 'string') fail(400, '缺少文件内容')
   await mkdir(path.dirname(file), { recursive: true })
@@ -1564,46 +1570,55 @@ function agentStage(id: string): string {
   if (path.relative(base, stage).startsWith('..') || stage === base) fail(400, 'Agent 工作目录无效')
   return stage
 }
-async function prepareAgentStage(id: string): Promise<{ stage: string; originals: Map<string, { hash: string; text: string }> }> {
-  const stage = agentStage(id)
-  const existing = await realpath(stage).catch(() => null)
-  if (existing && path.normalize(existing).toLowerCase() !== path.normalize(stage).toLowerCase()) fail(400, 'Agent 工作目录指向其他位置')
-  await rm(stage, { recursive: true, force: true })
-  await mkdir(stage, { recursive: true })
-  const originals = new Map<string, { hash: string; text: string }>()
-  const files = (await listProjectFiles(id)).filter(entry => entry.type === 'file')
-  if (files.length > 500 || files.reduce((sum, entry) => sum + (entry.size ?? 0), 0) > 100 * 1024 * 1024) fail(413, '项目超出 Agent 工作副本限制（500 个文件或 100 MB）')
-  for (const entry of files) {
-    if ((entry.size ?? 0) > 15 * 1024 * 1024) continue
-    const source = await safeFile(id, entry.path)
-    const target = path.join(stage, ...entry.path.split('/'))
-    await mkdir(path.dirname(target), { recursive: true })
-    await copyFile(source, target)
-    if ((entry.size ?? 0) <= 2 * 1024 * 1024) {
-      const bytes = await readFile(source)
-      if (!bytes.includes(0)) originals.set(entry.path, { hash: createHash('sha256').update(bytes).digest('hex'), text: bytes.toString('utf8') })
-    }
+async function prepareAgentStage(id: string, pending: boolean): Promise<string> {
+  const container = agentStage(id)
+  const { work, base } = workspacePaths(container)
+  if (pending) {
+    if ((await lstat(work).catch(() => null))?.isDirectory() && (await lstat(base).catch(() => null))?.isDirectory()) return work
+    fail(409, '旧草稿缺少工作副本，请先应用或放弃已有修改')
   }
-  return { stage, originals }
+  const files = (await listProjectFiles(id)).filter(entry => entry.type === 'file')
+  return createAgentWorkspace(container, projectDir(id), files)
 }
-async function agentChanges(stage: string, originals: Map<string, { hash: string; text: string }>): Promise<AgentChange[]> {
-  const changes: AgentChange[] = []
-  let total = 0
-  for (const [relative, original] of originals) {
-    const file = path.join(stage, ...relative.split('/'))
-    const resolved = await realpath(file).catch(() => null)
-    if (!resolved || path.relative(stage, resolved).startsWith('..') || path.isAbsolute(path.relative(stage, resolved))) continue
+
+async function agentStageSources(stage: string, selected: string[]): Promise<Map<string, { hash: string; text: string }>> {
+  const sources = new Map<string, { hash: string; text: string }>()
+  for (const relative of selected) {
+    const file = workspaceFile(stage, relative)
     const info = await lstat(file).catch(() => null)
     if (!info?.isFile() || info.isSymbolicLink() || info.size > 2 * 1024 * 1024) continue
     const bytes = await readFile(file)
     if (bytes.includes(0)) continue
-    const after = bytes.toString('utf8')
-    if (after === original.text) continue
-    total += bytes.length
-    if (changes.length >= 20 || total > 1024 * 1024) fail(413, 'Agent 修改量超过预览限制（20 个文件或 1 MB）')
-    changes.push({ path: relative, beforeHash: original.hash, before: original.text, after })
+    sources.set(relative, { hash: hashBytes(bytes), text: bytes.toString('utf8') })
   }
-  return changes
+  return sources
+}
+
+async function refreshAgentDraft(id: string, session: AgentSession): Promise<void> {
+  if (activeAgentProjects.has(id) || agentApplyingProjects.has(id)) return
+  const { work, base } = workspacePaths(agentStage(id))
+  if (!(await lstat(work).catch(() => null))?.isDirectory() || !(await lstat(base).catch(() => null))?.isDirectory()) return
+  const changes = await collectAgentChanges(base, work)
+  if (JSON.stringify(changes) !== JSON.stringify(session.pending)) {
+    session.pending = changes
+    if (!changes.length) session.pendingLane = undefined
+    session.updatedAt = new Date().toISOString()
+    await writeAgentSession(id, session)
+  }
+  if (!changes.length) await rm(agentStage(id), { recursive: true, force: true })
+}
+
+async function agentSelectedSources(id: string, selected: string[], selectionPath?: string): Promise<Map<string, { hash: string; text: string }>> {
+  const originals = new Map<string, { hash: string; text: string }>()
+  for (const relative of new Set([...selected, ...(selectionPath ? [selectionPath] : [])])) {
+    const file = await safeFile(id, relative)
+    const info = await stat(file)
+    if (info.size > 2 * 1024 * 1024) continue
+    const bytes = await readFile(file)
+    if (bytes.includes(0)) continue
+    originals.set(relative, { hash: createHash('sha256').update(bytes).digest('hex'), text: bytes.toString('utf8') })
+  }
+  return originals
 }
 
 app.get('/api/agent/providers', async request => {
@@ -1640,7 +1655,7 @@ app.patch<{ Params: { profileId: string }; Body: { label?: string; model?: strin
   if (input.label !== undefined) { if (typeof input.label !== 'string' || !input.label.trim() || input.label.length > 40) fail(400, '账号名称无效'); profile.label = input.label.trim() }
   if (input.model !== undefined) { if (typeof input.model !== 'string' || !/^[\w.:-]{0,100}$/.test(input.model) || (profile.provider === 'doubao' && input.model)) fail(400, '模型 ID 无效或不受此 CLI 支持'); profile.model = input.model }
   if (input.effort !== undefined) { if (!['auto', 'low', 'medium', 'high', 'xhigh'].includes(input.effort) || (['gemini', 'doubao'].includes(profile.provider) && input.effort !== 'auto') || (profile.provider === 'claude' && input.effort === 'xhigh')) fail(400, '此服务商不支持该智能程度'); profile.effort = input.effort as AgentProfile['effort'] }
-  if (input.timeoutSeconds !== undefined) { if (!Number.isInteger(input.timeoutSeconds) || input.timeoutSeconds < 30 || input.timeoutSeconds > 600) fail(400, '超时设置应为 30–600 秒'); profile.timeoutSeconds = input.timeoutSeconds }
+  if (input.timeoutSeconds !== undefined) { if (!Number.isInteger(input.timeoutSeconds) || input.timeoutSeconds !== 0 && (input.timeoutSeconds < 30 || input.timeoutSeconds > 3600)) fail(400, '超时设置应为不限制或 30–3600 秒'); profile.timeoutSeconds = input.timeoutSeconds }
   if (input.contextTurns !== undefined) { if (!Number.isInteger(input.contextTurns) || input.contextTurns < 0 || input.contextTurns > 30) fail(400, '共享轮数应为 0–30'); profile.contextTurns = input.contextTurns }
   if (input.shareContext !== undefined) { if (typeof input.shareContext !== 'boolean') fail(400, '共享设置无效'); profile.shareContext = input.shareContext }
   if (input.apiKey !== undefined || input.clearKey) {
@@ -1664,7 +1679,9 @@ app.post<{ Params: { profileId: string } }>('/api/agent/profiles/:profileId/logi
 app.get<{ Params: { id: string } }>('/api/projects/:id/agent/session', async request => {
   agentAccess(request)
   await getProject(request.params.id)
-  return { ...await readAgentSession(request.params.id), running: activeAgentProjects.has(request.params.id) }
+  const session = await readAgentSession(request.params.id)
+  await refreshAgentDraft(request.params.id, session)
+  return { ...session, running: activeAgentProjects.has(request.params.id) }
 })
 app.post<{ Params: { id: string }; Body: { provider?: AgentProviderId; profileId?: string; mode?: AgentMode; prompt?: string; files?: string[]; selection?: { path: string; start: number; end: number } } }>('/api/projects/:id/agent/run', async (request, reply) => {
   agentAccess(request)
@@ -1677,25 +1694,36 @@ app.post<{ Params: { id: string }; Body: { provider?: AgentProviderId; profileId
   if (!profile) fail(400, 'Agent 账号不存在或服务商不匹配')
   if (activeAgentProjects.has(id)) fail(409, '此项目已有 Agent 正在运行')
   const session = await readAgentSession(id)
-  if (session.pending.length) fail(409, '请先应用或放弃上次修改')
+  await refreshAgentDraft(id, session)
   for (const file of files) { const target = await safeFile(id, file); if (!(await stat(target)).isFile()) fail(400, '只能选择项目文件') }
   if (selection) { const target = await safeFile(id, selection.path); if (!(await stat(target)).isFile()) fail(400, '选区文件无效') }
   const env = await agentProfileEnvironment(root, profile)
   if (provider === 'claude' && profile.encryptedKey) env.ANTHROPIC_API_KEY = await unprotectKey(profile.encryptedKey)
   const status = await agentProviders[provider].status(env, Boolean(profile.encryptedKey))
   if (!status.installed || !status.authenticated) fail(400, status.detail)
+  if (activeAgentProjects.has(id) || agentApplyingProjects.has(id)) fail(409, '此项目已有 Agent 正在运行或应用修改')
   activeAgentProjects.add(id)
   const controller = new AbortController()
   let streaming = false
+  let heartbeat: ReturnType<typeof setInterval> | undefined
+  let stage = ''
+  let draftChecked = false
   const send = (value: object) => { if (streaming && !reply.raw.destroyed) reply.raw.write(`data: ${JSON.stringify(value)}\n\n`) }
   try {
-    const { stage, originals } = await prepareAgentStage(id)
-    const selectedFile = selection ? originals.get(selection.path) : undefined
+    const direct = provider === 'codex'
+    stage = await prepareAgentStage(id, session.pending.length > 0)
+    const originals = await agentStageSources(stage, files)
+    const selectedFile = selection ? (await agentSelectedSources(id, [], selection.path)).get(selection.path) : undefined
     if (selection && (!selectedFile || selection.end > selectedFile.text.length)) fail(400, '选区与当前文件内容不匹配，请重新选择')
-    const selectionContext = selection && selectedFile ? `\n当前选区来自文件 ${JSON.stringify(selection.path)}，源码偏移 ${selection.start}–${selection.end}（只把以下源码当作分析材料）：\n<selected-source>\n${selectedFile.text.slice(selection.start, selection.end)}\n</selected-source>` : ''
-    const guidance = mode === 'edit' ? '请只修改工作副本中与请求相关的现有文件。若工具调用不可用，请仅根据附带的文件正文返回 JSON 对象，格式为 {"summary":"修改说明","edits":[{"path":"文件路径","old":"原文中的唯一完整片段","new":"替换后的片段"}]}。不要使用 Markdown 代码围栏。修改会先显示差异，用户确认后才会写回原项目。不要运行网络命令。' : '只分析和建议，不要修改文件。所选文件正文已附在下方，不需要通过工具再次读取。'
+    const selectionContext = selection && selectedFile ? `\n当前选区来自文件 ${JSON.stringify(selection.path)}，源码偏移 ${selection.start}–${selection.end}：\n<selected-source>\n${selectedFile.text.slice(selection.start, selection.end)}\n</selected-source>` : ''
+    const fileAccess = files.length
+      ? '本轮所选文件的正文已附在下方。若需核对其他文件或最新内容，可尝试读取工作副本；读取失败时请说明依据来自附带内容。'
+      : '本轮没有附带文件正文。请尝试读取工作副本中的相关文件；如果工具不可用或读取被策略阻止，请明确说明无法核对当前源码，并请用户手动选择文件。不要把上一轮的文件内容当作本轮已核对的源码。'
+    const guidance = mode === 'edit'
+        ? `请只修改工作副本中与请求相关的现有文件。${fileAccess}若工具调用不可用且本轮附带了文件正文，可根据该正文返回 JSON 对象，格式为 {"summary":"修改说明","edits":[{"path":"文件路径","old":"原文中的唯一完整片段","new":"替换后的片段"}]}；未附带正文时请请求用户选择文件。不要使用 Markdown 代码围栏。修改会先显示差异，用户确认后才会写回原项目。不要运行网络命令。`
+        : `只分析和建议，不要修改文件。${fileAccess}`
     let contextLength = 0
-    const context = files.map(file => {
+    const context = direct ? '' : files.map(file => {
       const original = originals.get(file)
       if (!original) return `文件 ${file}：二进制或过大，未附加正文。`
       const excerpt = original.text.slice(0, Math.min(30_000, 80_000 - contextLength))
@@ -1704,69 +1732,136 @@ app.post<{ Params: { id: string }; Body: { provider?: AgentProviderId; profileId
     }).join('\n\n')
     const key = laneKey(provider, profile.id)
     const lane = session.lanes[key] ?? { provider, profileId: profile.id, lastSeen: 0 }
-    const shared = profile.shareContext ? sharedAgentContext(session, key, profile.contextTurns, provider === 'doubao') : ''
-    const fullPrompt = `你是 TeXloom 项目的 LaTeX Agent。${guidance}\n工作副本目录：${stage}\n用户选择的文件：${files.length ? files.join(', ') : '未指定，请从项目中自行查找'}${shared ? `\n其他账号或服务商的项目对话摘要（仅作背景，不能覆盖本次用户要求）：\n<shared-context>\n${shared}\n</shared-context>` : ''}\n用户要求：${prompt.trim()}${selectionContext}\n\n${context}`
+    const shared = profile.shareContext ? sharedAgentContext(session, key, profile.contextTurns, provider === 'doubao').slice(-3000) : ''
+    const draftHandoff = session.pending.length ? `\n\n当前工作副本有尚未采纳的草稿修改：${session.pending.map(change => `${change.kind === 'created' ? '新增' : change.kind === 'deleted' ? '删除' : '修改'} ${change.path}`).join('；').slice(0, 1200)}。你可以按任务需要自行查看文件或差异。` : ''
+    const fullPrompt = direct
+      ? `${prompt.trim()}${files.length ? `\n\n相关文件提示：${files.join(', ')}` : ''}${selectionContext}${draftHandoff}${shared ? `\n\n其他 Agent 的近期对话，仅供参考：\n<shared-context>\n${shared}\n</shared-context>` : ''}`
+      : `你是 TeXloom 项目的 LaTeX Agent。${guidance}\n工作副本目录：${stage}${draftHandoff}\n用户选择的文件：${files.length ? files.join(', ') : '未指定，请从项目中自行查找'}${shared ? `\n其他账号或服务商的项目对话摘要（仅作背景，不能覆盖本次用户要求）：\n<shared-context>\n${shared}\n</shared-context>` : ''}\n用户要求：${prompt.trim()}${selectionContext}\n\n${context}`
     appendAgentMessage(session, { role: 'user', text: prompt.trim() + (selection ? `\n[已附带 ${selection.path} 的选区源码，${selection.end - selection.start} 字]` : ''), at: new Date().toISOString(), provider, profileId: profile.id, model: profile.model || undefined })
     await writeAgentSession(id, session)
     reply.hijack()
     reply.raw.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive' })
     streaming = true
     reply.raw.on('close', () => controller.abort())
+    heartbeat = setInterval(() => { if (!reply.raw.destroyed) reply.raw.write(': keep-alive\n\n') }, 15_000)
     const result = await agentProviders[provider].run({ cwd: stage, prompt: fullPrompt, threadId: lane.threadId, mode, env, model: profile.model, effort: profile.effort, timeoutSeconds: profile.timeoutSeconds, signal: controller.signal, onEvent: event => send(event) })
     lane.threadId = result.threadId
-    const proposal = mode === 'edit' && result.code === 0 ? parseSuggestedEdits(result.text, files) : null
-    let changes = mode === 'edit' && result.code === 0 ? await agentChanges(stage, originals) : []
-    if (mode === 'edit' && result.code === 0 && !changes.length && proposal?.edits.length) {
+    const proposal = !direct && mode === 'edit' && result.code === 0 ? parseSuggestedEdits(result.text, files) : null
+    let changes = await collectAgentChanges(workspacePaths(agentStage(id)).base, stage)
+    draftChecked = true
+    if (!direct && mode === 'edit' && result.code === 0 && !changes.length && proposal?.edits.length) {
+      draftChecked = false
       const replacements = applySuggestedEdits(originals, proposal.edits)
       for (const [relative, source] of replacements) await writeFile(path.join(stage, ...relative.split('/')), source, 'utf8')
-      changes = await agentChanges(stage, originals)
+      changes = await collectAgentChanges(workspacePaths(agentStage(id)).base, stage)
+      draftChecked = true
     }
-    appendAgentMessage(session, { role: 'assistant', text: proposal?.summary || result.text || (result.code === 0 ? '已完成，未返回文字结果。' : '运行失败'), at: new Date().toISOString(), provider, profileId: profile.id, model: profile.model || undefined })
+    appendAgentMessage(session, { role: result.code !== 0 && !result.text ? 'system' : 'assistant', text: proposal?.summary || result.text || (result.code === 0 ? '已完成，未返回文字结果。' : `请求未完成：${result.error || 'CLI 运行失败'}`), at: new Date().toISOString(), provider, profileId: profile.id, model: profile.model || undefined, ...(result.code !== 0 && result.text ? { status: 'partial' as const } : {}) })
     lane.lastSeen = session.messages.at(-1)?.id ?? 0
     session.lanes[key] = lane
     session.pending = changes
     session.pendingLane = changes.length ? key : undefined
     session.updatedAt = new Date().toISOString()
     await writeAgentSession(id, session)
-    send({ type: 'complete', code: result.code, session })
+    send({ type: 'complete', code: result.code, error: result.error, session })
   } catch (error) {
-    if (streaming) send({ type: 'error', text: error instanceof Error ? error.message : String(error) })
+    if (streaming) {
+      const changes = stage ? await collectAgentChanges(workspacePaths(agentStage(id)).base, stage).then(value => { draftChecked = true; return value }).catch(() => session.pending) : session.pending
+      session.pending = changes
+      session.pendingLane = changes.length ? laneKey(provider, profile.id) : undefined
+      await writeAgentSession(id, session).catch(() => {})
+      send({ type: 'complete', code: -1, error: error instanceof Error ? error.message : String(error), session })
+    }
     else throw error
-  } finally { activeAgentProjects.delete(id); if (streaming) reply.raw.end() }
+  } finally {
+    clearInterval(heartbeat)
+    activeAgentProjects.delete(id)
+    if (stage && draftChecked && !session.pending.length) await rm(agentStage(id), { recursive: true, force: true }).catch(() => {})
+    if (streaming) reply.raw.end()
+  }
 })
-app.post<{ Params: { id: string } }>('/api/projects/:id/agent/apply', async request => {
+app.get<{ Params: { id: string } }>('/api/projects/:id/agent/review', async request => {
   agentAccess(request)
   await getProject(request.params.id)
-  if (activeAgentProjects.has(request.params.id)) fail(409, 'Agent 仍在运行')
   const session = await readAgentSession(request.params.id)
+  await refreshAgentDraft(request.params.id, session)
+  return { changes: await Promise.all(session.pending.map(async change => {
+    const current = await readWorkspaceFile(await safeFile(request.params.id, change.path))
+    const conflict = (current ? hashBytes(current) : undefined) !== change.beforeHash
+    const currentText = current && !current.includes(0) && current.length <= 200 * 1024 ? current.toString('utf8') : undefined
+    return { ...change, conflict, ...(conflict ? { current: currentText, currentSize: current?.length ?? 0 } : {}) }
+  })) }
+})
+
+app.get<{ Params: { id: string }; Querystring: { path: string; side: 'before' | 'after' | 'current' } }>('/api/projects/:id/agent/preview', async request => {
+  agentAccess(request)
+  await getProject(request.params.id)
+  const session = await readAgentSession(request.params.id)
+  if (!session.pending.some(item => item.path === request.query.path) || !['before', 'after', 'current'].includes(request.query.side)) fail(404, '草稿文件不存在')
+  const { base, work } = workspacePaths(agentStage(request.params.id))
+  const file = request.query.side === 'current' ? await safeFile(request.params.id, request.query.path) : workspaceFile(request.query.side === 'before' ? base : work, request.query.path)
+  const bytes = await readWorkspaceFile(file)
+  if (!bytes) return { content: '' }
+  if (bytes.length > 2 * 1024 * 1024) fail(413, '文件超过文本对照上限（2 MB）')
+  if (bytes.includes(0)) fail(415, '此文件是二进制文件')
+  const content = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+  return { content }
+})
+
+app.get<{ Params: { id: string }; Querystring: { path: string; side: 'before' | 'after' | 'current' } }>('/api/projects/:id/agent/asset', async (request, reply) => {
+  agentAccess(request)
+  await getProject(request.params.id)
+  const session = await readAgentSession(request.params.id)
+  const change = session.pending.find(item => item.path === request.query.path)
+  if (!change || !['before', 'after', 'current'].includes(request.query.side)) fail(404, '草稿图片不存在')
+  const mime: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.pdf': 'application/pdf' }
+  const type = mime[path.extname(change.path).toLowerCase()]
+  if (!type) fail(415, '此文件不支持图片预览')
+  const { base, work } = workspacePaths(agentStage(request.params.id))
+  const file = request.query.side === 'current' ? await safeFile(request.params.id, change.path) : workspaceFile(request.query.side === 'before' ? base : work, change.path)
+  const bytes = await readWorkspaceFile(file)
+  if (!bytes) fail(404, '草稿图片不存在')
+  if (bytes.length > 20 * 1024 * 1024) fail(413, '草稿图片过大')
+  return reply.header('Cache-Control', 'no-store').header('X-Content-Type-Options', 'nosniff').type(type).send(bytes)
+})
+
+app.post<{ Params: { id: string }; Body: { paths?: string[]; hunks?: Record<string, number[]> } }>('/api/projects/:id/agent/apply', async request => {
+  agentAccess(request)
+  const project = await getProject(request.params.id)
+  if (activeAgentProjects.has(project.id) || agentApplyingProjects.has(project.id)) fail(409, 'Agent 仍在运行或应用修改')
+  const session = await readAgentSession(project.id)
+  await refreshAgentDraft(project.id, session)
   if (!session.pending.length) fail(400, '没有待应用的修改')
-  for (const change of session.pending) {
-    const current = await readFile(await safeFile(request.params.id, change.path))
-    if (createHash('sha256').update(current).digest('hex') !== change.beforeHash) fail(409, `${change.path} 已变化，请放弃旧修改后重试`)
-  }
-  for (const change of session.pending) {
-    const file = await safeFile(request.params.id, change.path)
-    await writeFile(`${file}.agent-tmp`, change.after, 'utf8')
-    await rename(`${file}.agent-tmp`, file)
-  }
-  const paths = session.pending.map(change => change.path)
-  const owner = session.pendingLane ? session.lanes[session.pendingLane] : undefined
-  session.pending = []
-  session.pendingLane = undefined
-  if (owner) appendAgentMessage(session, { role: 'system', text: `已应用修改：${paths.join('、')}`, at: new Date().toISOString(), provider: owner.provider, profileId: owner.profileId })
-  session.updatedAt = new Date().toISOString()
-  await writeAgentSession(request.params.id, session)
-  return { applied: paths }
+  const requested = request.body?.paths ?? session.pending.map(change => change.path)
+  if (!Array.isArray(requested) || !requested.length || requested.length > session.pending.length || new Set(requested).size !== requested.length || requested.some(item => typeof item !== 'string' || !session.pending.some(change => change.path === item))) fail(400, '请选择有效的草稿文件')
+  const selected = session.pending.filter(change => requested.includes(change.path))
+  const hunks = request.body?.hunks ?? {}
+  if (!hunks || typeof hunks !== 'object' || Array.isArray(hunks) || Object.keys(hunks).some(file => !requested.includes(file))) fail(400, '采纳片段无效')
+  const { base, work } = workspacePaths(agentStage(project.id))
+  agentApplyingProjects.add(project.id)
+  try {
+    const applied = await applyAgentChanges(selected, base, work, relative => safeFile(project.id, relative), async () => { await createSnapshot(project, 'Agent 修改应用前') }, hunks)
+    const owner = session.pendingLane ? session.lanes[session.pendingLane] : undefined
+    session.pending = await collectAgentChanges(base, work)
+    if (!session.pending.length) session.pendingLane = undefined
+    if (owner) appendAgentMessage(session, { role: 'system', text: `已应用修改：${applied.join('、')}`, at: new Date().toISOString(), provider: owner.provider, profileId: owner.profileId })
+    session.updatedAt = new Date().toISOString()
+    await writeAgentSession(project.id, session)
+    await saveProject(project)
+    if (!session.pending.length) await rm(agentStage(project.id), { recursive: true, force: true })
+    return { applied, remaining: session.pending.length }
+  } finally { agentApplyingProjects.delete(project.id) }
 })
 app.post<{ Params: { id: string } }>('/api/projects/:id/agent/discard', async request => {
   agentAccess(request)
   await getProject(request.params.id)
-  if (activeAgentProjects.has(request.params.id)) fail(409, 'Agent 仍在运行')
+  if (activeAgentProjects.has(request.params.id) || agentApplyingProjects.has(request.params.id)) fail(409, 'Agent 仍在运行或应用修改')
   const session = await readAgentSession(request.params.id)
   session.pending = []
   session.pendingLane = undefined
   session.updatedAt = new Date().toISOString()
   await writeAgentSession(request.params.id, session)
+  await rm(agentStage(request.params.id), { recursive: true, force: true })
   return { ok: true }
 })
 

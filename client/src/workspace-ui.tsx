@@ -198,9 +198,9 @@ export function WorkspaceSidebar({ project, files, activePath, activePanel, onAg
       {panelTabs.filter(tab => tab.id !== 'settings').map(tab => <button key={tab.id} title={tab.label} aria-label={tab.label} aria-pressed={activePanel === tab.id} className={activePanel === tab.id ? 'selected' : ''} onClick={() => onPanelChange(activePanel === tab.id ? null : tab.id)}>{tab.icon}</button>)}
       <button title="设置" aria-label="设置" aria-pressed={activePanel === 'settings'} className={activePanel === 'settings' ? 'selected' : ''} onClick={() => onPanelChange(activePanel === 'settings' ? null : 'settings')}><Settings2 size={19} /></button>
     </nav>
-    {activePanel && <aside className="side-panel" aria-label={label}>
+    <aside className="side-panel" aria-label={label} style={{ display: activePanel ? undefined : 'none' }}>
       {activePanel !== 'agent' && <div className="side-panel-header"><strong>{label}</strong><button className="side-icon" title="收起侧栏" aria-label="收起侧栏" onClick={() => onPanelChange(null)}><X size={17} /></button></div>}
-      {activePanel === 'agent' && <AgentConsole projectId={project.id} files={files} activePath={activePath} onGetSelection={onAgentGetSelection} onBeforeRun={onAgentBeforeRun} onApplied={onAgentApplied} onSettings={() => { setSettingsSection('agent'); onPanelChange('settings') }} onClose={() => onPanelChange(null)} />}
+      <AgentConsole visible={activePanel === 'agent'} projectId={project.id} files={files} activePath={activePath} onGetSelection={onAgentGetSelection} onBeforeRun={onAgentBeforeRun} onApplied={onAgentApplied} onSettings={() => { setSettingsSection('agent'); onPanelChange('settings') }} onClose={() => onPanelChange(null)} />
       {activePanel === 'files' && <div className="files-panel">
         <div className="panel-project"><span className="project-avatar">{project.name.slice(0, 1)}</span><div><strong title={project.name}>{project.name}</strong><small>主文件：{project.mainFile}</small></div></div>
         <div className="panel-section-head"><strong>文件树</strong><div><button className="side-icon" title="新建文件" aria-label="新建文件" onClick={() => onCommand('newFile')}><FilePlus2 size={16} /></button><button className="side-icon" title="上传文件" aria-label="上传文件" onClick={() => onCommand('upload')}><Upload size={16} /></button></div></div>
@@ -222,8 +222,8 @@ export function WorkspaceSidebar({ project, files, activePath, activePanel, onAg
         {settingsSection === 'editing' && <><strong>编辑器与编译</strong><label>编辑器字号<select value={editorFontSize} onChange={event => onEditorPreferences(Number(event.target.value), editorWrap)}>{[11,12,13,14,15,16,18,20,22,24].map(size => <option key={size} value={size}>{size} px</option>)}</select></label><label className="settings-checkbox"><input type="checkbox" checked={editorWrap === 'on'} onChange={event => onEditorPreferences(editorFontSize, event.target.checked ? 'on' : 'off')} />自动换行</label><label className="settings-checkbox"><input type="checkbox" checked={autoCompile} onChange={event => onAutoCompile(event.target.checked)} />自动编译</label><p>大型项目可关闭自动编译，按“编译 PDF”手动生成预览。</p></>}
         {settingsSection === 'ai' && <AiServiceSettings value={aiSettings} onSave={onSaveAiSettings} />}
         {settingsSection === 'agent' && <AgentProfileSettings projectId={project.id} />}
-        {settingsSection === 'privacy' && <div className="settings-privacy"><strong>本机数据</strong><p>项目对话保存在本地 data/agent-sessions。不同 Agent 的对话默认可以共享最近记录；你可以在 Agent CLI 设置中逐账号关闭共享。</p><p>Claude Code 的密钥仅保存在本机加密配置中。Agent 的文件修改先进入工作副本，确认差异后才应用到项目。</p></div>}
+        {settingsSection === 'privacy' && <div className="settings-privacy"><strong>本机数据</strong><p>项目对话保存在本地 data/agent-sessions。不同 Agent 的对话默认可以共享最近记录；你可以在 Agent CLI 设置中逐账号关闭共享。</p><p>Claude Code 的密钥仅保存在本机加密配置中。各 Agent 在项目草稿副本中工作，修改需对照后采纳；Codex CLI 保留原生命令与项目文件操作，写入范围限制在草稿工作区。</p></div>}
       </div>}
-    </aside>}
+    </aside>
   </div>
 }

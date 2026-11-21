@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { AgentProviderId } from './agent-cli.js'
+import { windowsHttpsProxy } from './windows-proxy.js'
 
 export type AgentEffort = 'auto' | 'low' | 'medium' | 'high' | 'xhigh'
 export type AgentProfile = { id: string; provider: AgentProviderId; label: string; isolated: boolean; model: string; effort: AgentEffort; timeoutSeconds: number; contextTurns: number; shareContext: boolean; encryptedKey?: string }
@@ -9,10 +10,10 @@ export type AgentConfig = { version: 1; profiles: AgentProfile[] }
 export type AgentProfileView = Omit<AgentProfile, 'encryptedKey'> & { keyConfigured: boolean }
 
 export function defaultAgentConfig(): AgentConfig { return { version: 1, profiles: [
-  { id: 'codex-default', provider: 'codex', label: '系统默认账号', isolated: false, model: '', effort: 'auto', timeoutSeconds: 180, contextTurns: 12, shareContext: true },
-  { id: 'gemini-default', provider: 'gemini', label: '系统默认账号', isolated: false, model: '', effort: 'auto', timeoutSeconds: 180, contextTurns: 12, shareContext: true },
-  { id: 'claude-default', provider: 'claude', label: 'API Key 账号', isolated: true, model: '', effort: 'auto', timeoutSeconds: 180, contextTurns: 12, shareContext: true },
-  { id: 'doubao-default', provider: 'doubao', label: '系统默认账号', isolated: false, model: '', effort: 'auto', timeoutSeconds: 180, contextTurns: 12, shareContext: true },
+  { id: 'codex-default', provider: 'codex', label: '系统默认账号', isolated: false, model: '', effort: 'auto', timeoutSeconds: 0, contextTurns: 12, shareContext: true },
+  { id: 'gemini-default', provider: 'gemini', label: '系统默认账号', isolated: false, model: '', effort: 'auto', timeoutSeconds: 0, contextTurns: 12, shareContext: true },
+  { id: 'claude-default', provider: 'claude', label: 'API Key 账号', isolated: true, model: '', effort: 'auto', timeoutSeconds: 0, contextTurns: 12, shareContext: true },
+  { id: 'doubao-default', provider: 'doubao', label: '系统默认账号', isolated: false, model: '', effort: 'auto', timeoutSeconds: 0, contextTurns: 12, shareContext: true },
 ] } }
 
 export function agentProfileView(profile: AgentProfile): AgentProfileView {
@@ -21,7 +22,7 @@ export function agentProfileView(profile: AgentProfile): AgentProfileView {
 }
 
 export function newAgentProfile(provider: AgentProviderId, label: string): AgentProfile {
-  return { id: randomUUID(), provider, label, isolated: true, model: '', effort: 'auto', timeoutSeconds: 180, contextTurns: 12, shareContext: true }
+  return { id: randomUUID(), provider, label, isolated: true, model: '', effort: 'auto', timeoutSeconds: 0, contextTurns: 12, shareContext: true }
 }
 
 export async function readAgentConfig(root: string): Promise<AgentConfig> {
@@ -43,8 +44,13 @@ export async function writeAgentConfig(root: string, config: AgentConfig): Promi
   await rename(`${file}.tmp`, file)
 }
 
+export function agentProxyEnvironment(env: NodeJS.ProcessEnv, systemProxy: string): NodeJS.ProcessEnv {
+  if (systemProxy && !env.HTTPS_PROXY && !env.https_proxy && !env.ALL_PROXY && !env.all_proxy) env.HTTPS_PROXY = systemProxy
+  return env
+}
+
 export async function agentProfileEnvironment(root: string, profile: AgentProfile): Promise<NodeJS.ProcessEnv> {
-  const env = { ...process.env }
+  const env = agentProxyEnvironment({ ...process.env }, windowsHttpsProxy())
   if (profile.isolated) {
     for (const key of ['OPENAI_API_KEY', 'CODEX_API_KEY', 'CODEX_ACCESS_TOKEN', 'ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY']) delete env[key]
     const home = path.join(root, 'data', 'agent-accounts', profile.id)
