@@ -10,13 +10,14 @@ to apply:
 | Fastify, `@fastify/static`, `@fastify/multipart`, `adm-zip` | MIT |
 | Lucide React | ISC |
 | PDF.js (`pdfjs-dist`) | Apache-2.0 |
+| KaTeX (`katex`) | MIT |
 
 The Windows compiler in `runtime/tectonic.exe` is the [Tectonic project](https://github.com/tectonic-typesetting/tectonic),
 licensed under MIT. Tectonic incorporates work from TeX and XeTeX with
 additional third-party notices; consult the [upstream license](https://github.com/tectonic-typesetting/tectonic/blob/master/LICENSE)
 and its release materials when redistributing the executable.
 
-Copies of the PDF.js, Lucide and Tectonic license texts are included in
+Copies of the PDF.js, KaTeX, Lucide and Tectonic license texts are included in
 `licenses/`.
 
 The npm dependency tree is recorded in `package-lock.json`. Package archives

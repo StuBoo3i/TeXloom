@@ -8,6 +8,7 @@
     "dev:api": "tsx watch server/index.ts",
     "dev:web": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
+    "build:pages": "tsc --noEmit && vite build --config vite.pages.config.ts --mode pages",
     "start": "tsx server/index.ts"
   },
   "dependencies": {
@@ -16,6 +17,7 @@
     "@monaco-editor/react": "^4.7.0",
     "adm-zip": "^0.6.1",
     "fastify": "^5.7.0",
+    "katex": "^0.19.1",
     "lucide-react": "^0.468.0",
     "monaco-editor": "^0.57.0",
     "pdfjs-dist": "^6.5.438",

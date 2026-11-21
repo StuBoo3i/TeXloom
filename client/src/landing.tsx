@@ -1,12 +1,15 @@
-import type { MouseEvent, ReactNode } from 'react'
-import { ArrowDown, ArrowRight, ArrowUpRight, BookOpenText, Check, FileCode2, FileText, GitBranch, Github, LockKeyhole, MousePointer2, PanelRight, ShieldCheck } from 'lucide-react'
+import { useEffect, useRef, type MouseEvent, type ReactNode } from 'react'
+import { ArrowDown, ArrowRight, ArrowUpRight, BookOpenText, Check, Code2, FileCode2, FileText, GitBranch, Github, Image as ImageIcon, LockKeyhole, MousePointer2, PanelRight, Pencil, ShieldCheck, Sparkles, FolderOpen, MessageSquareText, WandSparkles } from 'lucide-react'
 import './landing.css'
 
-const workspaceUrl = '/?view=workspace'
 const githubUrl = 'https://github.com/StuBoo3i/TeXloom'
+const publicSite = import.meta.env.MODE === 'pages'
+const workspaceUrl = publicSite ? githubUrl : '/?view=workspace'
+const homeUrl = import.meta.env.BASE_URL
+const iconUrl = `${homeUrl}icon.png`
 
 const features = [
-  { number: '01', icon: <FileCode2 size={24} strokeWidth={1.65} />, title: '为 LaTeX 而生的编辑体验', copy: '语法着色、文件树、全文搜索与常用插入工具，把复杂工程整理成清晰的写作空间。', accent: 'blue' },
+  { number: '01', icon: <FileCode2 size={24} strokeWidth={1.65} />, title: '两种视图，一份 LaTeX 源码', copy: '在 Visual 中阅读、修改正文与公式；需要精确控制时切回 Code。两种模式共用保存、撤销和编译。', accent: 'blue' },
   { number: '02', icon: <MousePointer2 size={24} strokeWidth={1.65} />, title: '源码与 PDF，双向抵达', copy: '编辑器与预览并排工作。通过 SyncTeX 在源码和成稿之间定位，修改不再靠翻页寻找。', accent: 'cyan' },
   { number: '03', icon: <LockKeyhole size={24} strokeWidth={1.65} />, title: '你的文件，留在你的电脑', copy: '选择自己的项目目录，用本地 Tectonic 编译。写作数据由你掌控，无需建立平台账户。', accent: 'sand' },
   { number: '04', icon: <GitBranch size={24} strokeWidth={1.65} />, title: '从独写到协作，自然衔接', copy: '连接 GitHub 私有仓库，在个人分支上写作、提交与审阅；AI 助手按需接入自己的 API。', accent: 'lavender' },
@@ -22,11 +25,39 @@ function WorkspaceLink({ children, className, onEnter }: { children: ReactNode; 
   return <a href={workspaceUrl} className={className} onClick={navigate}>{children}</a>
 }
 
+function VisualShowcase({ onEnter }: { onEnter: () => void }) {
+  return <section id="visual" className="lp-visual"><div className="lp-container lp-visual-inner">
+    <div className="lp-visual-copy lp-reveal"><span className="lp-section-index">01 / VISUAL WRITING</span><h2>看见文章的样子，<br /><em>仍握住源码的力量。</em></h2><p>Visual 将 LaTeX 变成清晰的阅读与编辑界面：点击文字直接修改，公式就地预览，图片和表格以卡片呈现。排版结果始终由右侧 PDF 告诉你。</p><div className="lp-visual-points"><div><Pencil size={18} /><span><strong>所见即改</strong>正文、标题与公式在当前位置编辑</span></div><div><Code2 size={18} /><span><strong>随时切换</strong>Code / Visual 共用同一份源码</span></div><div><ImageIcon size={18} /><span><strong>图表成卡</strong>预览、评论或单独编译</span></div></div><WorkspaceLink className="lp-workflow-link" onEnter={onEnter}>{publicSite ? '了解 Visual 用法' : '体验可视化编辑'} <ArrowRight size={18} /></WorkspaceLink></div>
+    <div className="lp-visual-stage lp-reveal" aria-label="Visual 编辑模式与 PDF 并排预览示意"><div className="lp-visual-window"><div className="lp-visual-window-top"><span>论文草稿 <b>›</b> main.tex</span><span className="lp-visual-saved"><Check size={13} /> 已保存</span></div><div className="lp-visual-window-body"><div className="lp-visual-document"><div className="lp-visual-document-head"><span>源文件</span><div className="lp-visual-switch"><span>Code</span><strong>Visual</strong></div></div><div className="lp-visual-tools">↶ &nbsp; ↷ &nbsp; H &nbsp; B &nbsp; 𝑰 &nbsp; ∑ &nbsp; Ω &nbsp; ↗ &nbsp; ▦</div><div className="lp-visual-page"><span className="lp-visual-eyebrow">可视化编辑 · 点击正文直接修改</span><h3>研究背景</h3><p>在这里组织思路，让文字、公式和图表自然地连成一篇文章。<Pencil size={11} /></p><div className="lp-visual-equation">E = mc² <Pencil size={11} /></div><div className="lp-visual-media"><div><ImageIcon size={14} /> 图表卡片 <span>查看预览 · 评论 · 单独编译</span></div><div className="lp-visual-media-art"><i /><i /><i /></div><small>图 1 · 一个清晰的示意图</small></div></div></div><div className="lp-visual-pdf"><div>PDF 预览 <span>完整编译结果</span></div><article><small>研究论文</small><h3>研究背景</h3><p>在这里组织思路，让文字、公式和图表自然地连成一篇文章。</p><strong>E = mc²</strong><div className="lp-visual-pdf-figure"><i /><i /><i /></div><small>图 1 · 一个清晰的示意图</small></article></div></div></div><span className="lp-visual-caption">VISUAL + PDF · 界面示意</span></div>
+  </div></section>
+}
+
+function CollaborationShowcase({ onEnter }: { onEnter: () => void }) {
+  return <section id="collaboration" className="lp-story lp-story-collab"><div className="lp-container lp-story-grid">
+    <div className="lp-story-copy lp-reveal"><span className="lp-section-index">02 / SHARED THINKING</span><span className="lp-story-name">共识空间 · Shared Thinking</span><h2>好的研究，<br /><em>值得一起打磨。</em></h2><p>每个人在自己的 GitHub 分支上写作，远程分支可以只读查看。评论、回复与修改建议跟着审阅记录走，让讨论始终贴近文章。</p><ul><li><Check size={16} />个人分支提交，借助 Pull Request 汇合成果</li><li><Check size={16} />主分支禁止应用内直推，先审阅再合并</li><li><Check size={16} />接受建议前核对原文，减少误改</li></ul><WorkspaceLink className="lp-story-link" onEnter={onEnter}>{publicSite ? '了解协作方式' : '进入协作工作台'} <ArrowRight size={18} /></WorkspaceLink></div>
+    <div className="lp-scene lp-scene-collab lp-reveal" aria-label="GitHub 分支与审阅讨论界面示意"><div className="lp-scene-top"><GitBranch size={17} /> 项目协作 <span>feature/method</span></div><div className="lp-branch-line"><span>main</span><i /><span>feature/method</span><strong>待审阅</strong></div><div className="lp-review-card"><div className="lp-review-quote">“这一段的定义可以再明确一些。”</div><div className="lp-review-author"><span>A</span><strong>研究成员 A</strong><small>第 3 节 · 修改建议</small></div></div><div className="lp-review-card lp-review-card-reply"><div className="lp-review-quote">“已补充边界条件，欢迎继续核对。”</div><div className="lp-review-author"><span>B</span><strong>研究成员 B</strong><small>已回复</small></div></div><div className="lp-scene-note"><MessageSquareText size={17} /> 从分支到讨论，每一步都有上下文</div></div>
+  </div></section>
+}
+
+function LocalShowcase({ onEnter }: { onEnter: () => void }) {
+  return <section id="local" className="lp-story lp-story-local"><div className="lp-container lp-story-grid">
+    <div className="lp-scene lp-scene-local lp-reveal" aria-label="本地项目分类与文件夹管理界面示意"><div className="lp-scene-top"><FolderOpen size={17} /> 本地工作空间 <span>仅保存在此电脑</span></div><div className="lp-local-layout"><aside><strong>项目空间</strong><span className="active">所有项目 <b>03</b></span><span>个人项目 <b>02</b></span><span>共享项目 <b>01</b></span><span>归档 <b>00</b></span><small>我的标签</small><span>论文 · 2026</span></aside><div><div className="lp-local-search">⌕ &nbsp; 搜索项目、标签与文件</div><div className="lp-local-cards"><article><FileText size={21} /><strong>研究论文</strong><small>main.tex</small><span>论文 · 2026</span></article><article><FileText size={21} /><strong>实验报告</strong><small>report.tex</small><span>个人项目</span></article></div></div></div><div className="lp-scene-note"><ShieldCheck size={17} /> 项目目录由你选择，整理也在本机完成</div></div>
+    <div className="lp-story-copy lp-reveal"><span className="lp-section-index">03 / YOUR SPACE</span><span className="lp-story-name">有序之所 · Your Space</span><h2>项目井然有序，<br /><em>文件自在本地。</em></h2><p>从新建、ZIP 或文件夹导入开始，用分类、标签和搜索找到每一份工作。项目根目录由你决定，批量导出也保留清晰的文件结构。</p><ul><li><Check size={16} />自选本地根目录，已有项目仍可打开</li><li><Check size={16} />按个人、共享、归档和标签整理项目</li><li><Check size={16} />批量导入导出，适合迁移与备份</li></ul><WorkspaceLink className="lp-story-link" onEnter={onEnter}>{publicSite ? '了解本地管理' : '整理我的项目'} <ArrowRight size={18} /></WorkspaceLink></div>
+  </div></section>
+}
+
+function AiShowcase({ onEnter }: { onEnter: () => void }) {
+  return <section id="ai" className="lp-story lp-story-ai"><div className="lp-container lp-story-grid">
+    <div className="lp-story-copy lp-reveal"><span className="lp-section-index">04 / THOUGHTFUL ASSISTANCE</span><span className="lp-story-name">灵感同行 · Thoughtful Assistance</span><h2>思路向前，<br /><em>表达更从容。</em></h2><p>翻译、润色、解释编译错误，或生成公式与表格。AI 的结果先与原文并排预览，再由你决定是否应用；宏包建议也可先在本机分析。</p><ul><li><Check size={16} />主动请求时才将选区与要求发送至 DeepSeek</li><li><Check size={16} />修改前预览原文与结果</li><li><Check size={16} />API Key 在本机加密保存，可随时清除</li></ul><WorkspaceLink className="lp-story-link" onEnter={onEnter}>{publicSite ? '了解 AI 助手' : '打开写作助手'} <ArrowRight size={18} /></WorkspaceLink></div>
+    <div className="lp-scene lp-scene-ai lp-reveal" aria-label="AI 写作建议及应用前预览界面示意"><div className="lp-scene-top"><Sparkles size={17} /> 写作助手 <span>由你决定是否应用</span></div><div className="lp-ai-request"><small>当前任务 · 润色</small><p>让这段论述更精炼，保留公式与引用。</p></div><div className="lp-ai-compare"><div><small>原文</small><p>我们得到下面的结果，并且这一结果能够说明模型具有较好的效果。</p></div><div><small>建议版本</small><p>结果表明，该模型在当前条件下表现稳定。</p></div></div><div className="lp-ai-actions"><span><ShieldCheck size={14} /> 先预览，再应用</span><strong><WandSparkles size={14} /> 应用修改</strong></div></div>
+  </div></section>
+}
+
 function ProductPreview() {
   return <div className="lp-preview-wrap">
     <div className="lp-preview-orbit lp-preview-orbit-one" /><div className="lp-preview-orbit lp-preview-orbit-two" />
     <div className="lp-preview" aria-label="TeXloom 编辑器与 PDF 预览界面示意">
-      <div className="lp-preview-top"><div className="lp-window-dots"><i /><i /><i /></div><span className="lp-preview-brand"><img src="/icon.png" alt="" />TeXloom</span><span className="lp-preview-local"><i />本地工作空间</span></div>
+      <div className="lp-preview-top"><div className="lp-window-dots"><i /><i /><i /></div><span className="lp-preview-brand"><img src={iconUrl} alt="" />TeXloom</span><span className="lp-preview-local"><i />本地工作空间</span></div>
       <div className="lp-preview-toolbar"><span className="lp-preview-crumb">研究论文 <b>/</b> main.tex</span><span className="lp-preview-compile"><Check size={12} /> 编译成功</span></div>
       <div className="lp-preview-body">
         <aside className="lp-preview-files"><span className="lp-preview-files-title">PROJECT FILES</span><span className="lp-preview-file active"><FileCode2 size={12} /> main.tex</span><span className="lp-preview-file"><FileText size={12} /> references.bib</span><span className="lp-preview-file"><FileText size={12} /> figures</span><span className="lp-preview-files-bottom">Tectonic 已就绪</span></aside>
@@ -48,21 +79,38 @@ function ProductPreview() {
     <span className="lp-preview-caption">WORKSPACE PREVIEW · 界面示意</span>
   </div>
 }
-
 export function Landing({ onEnter }: { onEnter: () => void }) {
-  return <div className="landing-page">
-    <header className="lp-header"><div className="lp-container lp-header-inner"><a className="lp-logo" href="/" aria-label="TeXloom 首页"><span><img src="/icon.png" alt="" /></span><strong>TeXloom</strong></a><nav aria-label="首页导航"><a href="#features">产品亮点</a><a href="#workflow">写作流程</a><a href="#open-source">开源与隐私</a></nav><WorkspaceLink className="lp-nav-cta" onEnter={onEnter}>打开工作台 <ArrowUpRight size={16} /></WorkspaceLink></div></header>
+  const pageRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const page = pageRef.current
+    if (!page || !('IntersectionObserver' in window)) return
+    const items = [...page.querySelectorAll<HTMLElement>('.lp-reveal')]
+    const observer = new IntersectionObserver(entries => entries.forEach(entry => {
+      entry.target.classList.toggle('is-visible', entry.isIntersecting)
+    }), { threshold: 0.12, rootMargin: '0px 0px -40px 0px' })
+    items.forEach(item => observer.observe(item))
+    page.classList.add('lp-motion-ready')
+    return () => observer.disconnect()
+  }, [])
+  return <div className="landing-page" id="top" ref={pageRef}>
+    <header className="lp-header"><div className="lp-container lp-header-inner"><a className="lp-logo" href={homeUrl} aria-label="TeXloom 首页"><span><img src={iconUrl} alt="" /></span><strong>TeXloom</strong></a><nav aria-label="首页导航"><a href="#visual">Visual 编辑</a><a href="#collaboration">多人协作</a><a href="#local">本地管理</a><a href="#ai">AI 辅助</a></nav><WorkspaceLink className="lp-nav-cta" onEnter={onEnter}>{publicSite ? '获取 TeXloom' : '打开工作台'} <ArrowUpRight size={16} /></WorkspaceLink></div></header>
 
     <main>
-      <section className="lp-hero"><div className="lp-container lp-hero-grid"><div className="lp-hero-copy"><div className="lp-kicker"><span className="lp-kicker-line" />本地 LaTeX 写作工作台<span className="lp-kicker-separator">/</span>免费开源</div><h1>让研究成为主角，<br /><em>让写作自然成形。</em></h1><p>从 LaTeX 源码到清晰 PDF，只需一张工作台。TeXloom 在本机编译，保留你的文件与目录，让写作、预览和审阅顺畅衔接。</p><div className="lp-hero-actions"><WorkspaceLink className="lp-button lp-button-primary" onEnter={onEnter}>打开工作台 <ArrowUpRight size={20} /></WorkspaceLink><a className="lp-button lp-button-text" href="#features">了解 TeXloom <ArrowDown size={17} /></a></div><div className="lp-hero-foot"><span><Check size={14} />核心功能免费开源</span><span><Check size={14} />无需平台账户</span><span><Check size={14} />源码保存在本机</span></div></div><ProductPreview /></div><div className="lp-hero-bottom"><div className="lp-container"><span>BUILT FOR THOUGHTFUL WRITING</span><span>WRITE <i /> COMPILE <i /> REVIEW</span></div></div></section>
+      <section className="lp-hero"><div className="lp-container lp-hero-grid"><div className="lp-hero-copy"><div className="lp-kicker"><span className="lp-kicker-line" />本地 LaTeX 写作工作台<span className="lp-kicker-separator">/</span>免费开源</div><h1>让研究成为主角，<br /><em>让写作自然成形。</em></h1><p>在优雅的 Visual 模式中直接写作，随时切回 LaTeX 源码精确控制；右侧 PDF 同步呈现本地编译结果。你的文件与目录始终由你掌控。</p><div className="lp-hero-actions"><WorkspaceLink className="lp-button lp-button-primary" onEnter={onEnter}>{publicSite ? '获取 TeXloom' : '打开工作台'} <ArrowUpRight size={20} /></WorkspaceLink><a className="lp-button lp-button-text" href="#visual">探索 Visual 编辑 <ArrowDown size={17} /></a></div><div className="lp-hero-foot"><span><Check size={14} />Visual 与 Code 自由切换</span><span><Check size={14} />本机编译 PDF</span><span><Check size={14} />源码保存在本机</span></div></div><ProductPreview /></div><div className="lp-hero-bottom"><div className="lp-container"><span>BUILT FOR THOUGHTFUL WRITING</span><span>WRITE <i /> COMPILE <i /> REVIEW</span></div></div></section>
 
-      <section id="features" className="lp-features lp-container"><div className="lp-section-heading"><div><span className="lp-section-index">01 / THE ESSENTIALS</span><h2>一切围绕写作，<br />细节服务于思考。</h2></div><p>专业工具应当安静而可靠。TeXloom 将源码、成稿与项目组织放在你需要的位置。</p></div><div className="lp-feature-grid">{features.map(feature => <article className={`lp-feature lp-feature-${feature.accent}`} key={feature.number}><div className="lp-feature-top"><span className="lp-feature-icon">{feature.icon}</span><span className="lp-feature-number">{feature.number}</span></div><h3>{feature.title}</h3><p>{feature.copy}</p><span className="lp-feature-rule" /></article>)}</div></section>
+      <VisualShowcase onEnter={onEnter} />
 
-      <section id="workflow" className="lp-workflow"><div className="lp-container lp-workflow-inner"><div className="lp-workflow-intro"><span className="lp-section-index">02 / THE FLOW</span><h2>从第一行源码，<br />到可以分享的论文。</h2><p>把工具切换留给 TeXloom，把注意力还给你的研究。</p><WorkspaceLink className="lp-workflow-link" onEnter={onEnter}>现在开始 <ArrowRight size={18} /></WorkspaceLink></div><div className="lp-workflow-steps"><div><span>01</span><i><FileCode2 size={24} /></i><h3>写</h3><p>在结构清晰的项目里编辑 LaTeX。</p></div><div><span>02</span><i><BookOpenText size={24} /></i><h3>编译</h3><p>本地 Tectonic 生成 PDF，随时对照。</p></div><div><span>03</span><i><GitBranch size={24} /></i><h3>协作</h3><p>用 GitHub 分支和审阅记录汇集意见。</p></div></div></div></section>
+      <CollaborationShowcase onEnter={onEnter} />
+      <LocalShowcase onEnter={onEnter} />
+      <AiShowcase onEnter={onEnter} />
 
-      <section id="open-source" className="lp-open-source lp-container"><div className="lp-open-source-mark"><ShieldCheck size={30} strokeWidth={1.5} /><span>YOUR WORK. YOUR SPACE.</span></div><div><span className="lp-section-index">03 / OPEN BY DESIGN</span><h2>你的论文，<br />始终由你掌控。</h2><p>TeXloom 免费开源。项目保存在你指定的本地目录，普通编辑与编译不需要云端账户。需要多人协作时，再连接你的 GitHub 仓库；AI 功能按需填写自己的 API Key。</p><div className="lp-open-source-actions"><WorkspaceLink className="lp-button lp-button-primary" onEnter={onEnter}>进入工作台 <ArrowUpRight size={19} /></WorkspaceLink><a href={githubUrl} target="_blank" rel="noopener noreferrer" className="lp-github-link"><Github size={18} /> 查看 GitHub 源码 <ArrowUpRight size={15} /></a></div></div></section>
+      <section id="features" className="lp-features lp-container"><div className="lp-section-heading lp-reveal"><div><span className="lp-section-index">05 / THE ESSENTIALS</span><h2>一切围绕写作，<br />细节服务于思考。</h2></div><p>专业工具应当安静而可靠。TeXloom 将源码、成稿与项目组织放在你需要的位置。</p></div><div className="lp-feature-grid">{features.map(feature => <article className={`lp-feature lp-feature-${feature.accent} lp-reveal`} key={feature.number}><div className="lp-feature-top"><span className="lp-feature-icon">{feature.icon}</span><span className="lp-feature-number">{feature.number}</span></div><h3>{feature.title}</h3><p>{feature.copy}</p><span className="lp-feature-rule" /></article>)}</div></section>
+
+      <section id="workflow" className="lp-workflow"><div className="lp-container lp-workflow-inner"><div className="lp-workflow-intro lp-reveal"><span className="lp-section-index">06 / THE FLOW</span><h2>从眼前的文字，<br />到可以分享的论文。</h2><p>Visual 帮你专注内容，Code 让每一处细节可控；TeXloom 在本机编译正式 PDF。</p><WorkspaceLink className="lp-workflow-link" onEnter={onEnter}>{publicSite ? '查看项目源码' : '现在开始'} <ArrowRight size={18} /></WorkspaceLink></div><div className="lp-workflow-steps lp-reveal"><div><span>01</span><i><FileCode2 size={24} /></i><h3>写</h3><p>在 Visual 或 Code 中编辑同一份 LaTeX。</p></div><div><span>02</span><i><BookOpenText size={24} /></i><h3>编译</h3><p>本地 Tectonic 生成 PDF，随时对照。</p></div><div><span>03</span><i><GitBranch size={24} /></i><h3>协作</h3><p>用 GitHub 分支和审阅记录汇集意见。</p></div></div></div></section>
+
+      <section id="open-source" className="lp-open-source lp-container"><div className="lp-open-source-mark lp-reveal"><ShieldCheck size={30} strokeWidth={1.5} /><span>YOUR WORK. YOUR SPACE.</span></div><div><span className="lp-section-index">07 / OPEN BY DESIGN</span><h2>你的论文，<br />始终由你掌控。</h2><p>TeXloom 免费开源。项目保存在你指定的本地目录，普通编辑与编译不需要云端账户。需要多人协作时，再连接你的 GitHub 仓库；AI 功能按需填写自己的 API Key。</p><div className="lp-open-source-actions"><WorkspaceLink className="lp-button lp-button-primary" onEnter={onEnter}>{publicSite ? '获取 TeXloom' : '进入工作台'} <ArrowUpRight size={19} /></WorkspaceLink><a href={githubUrl} target="_blank" rel="noopener noreferrer" className="lp-github-link"><Github size={18} /> 查看 GitHub 源码 <ArrowUpRight size={15} /></a></div></div></section>
     </main>
 
-    <footer className="lp-footer"><div className="lp-container lp-footer-inner"><a className="lp-logo" href="/"><span><img src="/icon.png" alt="" /></span><strong>TeXloom</strong></a><p>为专注的研究与写作而造。</p><div><a href={githubUrl} target="_blank" rel="noopener noreferrer">GitHub <ArrowUpRight size={13} /></a><a href="#features">返回顶部 ↑</a></div></div></footer>
+    <footer className="lp-footer"><div className="lp-container lp-footer-inner"><a className="lp-logo" href={homeUrl}><span><img src={iconUrl} alt="" /></span><strong>TeXloom</strong></a><p>为专注的研究与写作而造。</p><div><a href={githubUrl} target="_blank" rel="noopener noreferrer">GitHub <ArrowUpRight size={13} /></a><a href="#top">返回顶部 ↑</a></div></div></footer>
   </div>
 }

@@ -4,7 +4,7 @@ import fastifyStatic from '@fastify/static'
 import AdmZip from 'adm-zip'
 import { spawn } from 'node:child_process'
 import { createReadStream, existsSync, lstatSync } from 'node:fs'
-import { copyFile, lstat, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { copyFile, link, lstat, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash, randomUUID } from 'node:crypto'
@@ -17,6 +17,7 @@ import { githubRemote, safeBranch } from './git-collab.js'
 import { windowsHttpsProxy } from './windows-proxy.js'
 import { foldReviewEvents, makeReviewEvent, readReviewEvents, writeReviewEvent, type ReviewEvent, type ReviewThread } from './review-events.js'
 import { localPackageAdvice, packageCatalog, packageInsertion, validateAiAdvice } from './package-advice.js'
+import { draftSource } from './draft-compile.js'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const defaultProjectsRoot = path.join(root, 'projects')
@@ -30,10 +31,11 @@ const app = Fastify({ logger: false, bodyLimit: 2 * 1024 * 1024 })
 
 type Project = { id: string; name: string; mainFile: string; createdAt: string; updatedAt: string; sharing?: 'personal' | 'shared'; archived?: boolean; tags?: string[] }
 type FileEntry = { path: string; type: 'file' | 'directory'; size?: number }
-type Job = { id: string; projectId: string; status: 'running' | 'success' | 'error'; log: string; startedAt: string; finishedAt?: string }
+type Job = { id: string; projectId: string; status: 'running' | 'success' | 'error'; log: string; startedAt: string; finishedAt?: string; mode?: 'full' | 'draft' }
 type Snapshot = { id: string; note: string; createdAt: string; fileCount: number }
 const jobs = new Map<string, Job>()
 const activeProjects = new Set<string>()
+const activeCardPreviews = new Set<string>()
 const reviewLocks = new Map<string, Promise<void>>()
 const folderSelections = new Map<string, { path: string; mode: 'import' | 'export' | 'workspace'; expires: number }>()
 
@@ -543,18 +545,40 @@ async function assertCollaborationRemote(directory: string): Promise<string> {
   }
 }
 
-async function runCompile(job: Job, project: Project): Promise<void> {
+async function stageDraftProject(project: Project, stage: string, included: ReadonlySet<string>): Promise<void> {
+  const origin = projectDir(project.id)
+  async function copyDirectory(from: string, to: string, prefix = ''): Promise<void> {
+    await mkdir(to, { recursive: true })
+    for (const entry of await readdir(from, { withFileTypes: true })) {
+      if (entry.name === '.openleaf' || entry.name === '.git' || entry.name === 'node_modules') continue
+      const relative = prefix ? `${prefix}/${entry.name}` : entry.name
+      const source = path.join(from, entry.name)
+      const destination = path.join(to, entry.name)
+      if (entry.isDirectory()) await copyDirectory(source, destination, relative)
+      else if (entry.isFile() && entry.name.endsWith('.tex')) {
+        const original = await readFile(source, 'utf8')
+        await writeFile(destination, draftSource(original, relative, included).source, 'utf8')
+      } else if (entry.isFile()) await link(source, destination).catch(() => copyFile(source, destination))
+    }
+  }
+  await copyDirectory(origin, stage)
+}
+
+async function runCompile(job: Job, project: Project, included?: ReadonlySet<string>): Promise<void> {
   const dir = projectDir(project.id)
   const outDir = path.join(dir, '.openleaf', 'build', job.id)
-  await mkdir(outDir, { recursive: true })
-  const input = await safeFile(project.id, project.mainFile)
-  const args = ['-X', 'compile', '--untrusted', '--synctex', '--outdir', outDir, input]
-  const child = spawn(tectonicPath, args, { cwd: dir, shell: false, windowsHide: true, env: { ...process.env, TECTONIC_UNTRUSTED_MODE: '1' } })
-  const append = (chunk: Buffer) => { job.log = (job.log + chunk.toString('utf8')).slice(-250_000) }
-  child.stdout.on('data', append)
-  child.stderr.on('data', append)
-  const timer = setTimeout(() => { job.log += '\n编译超时（600 秒），已终止。'; child.kill() }, 600_000)
+  let timer: ReturnType<typeof setTimeout> | undefined
   try {
+    await mkdir(outDir, { recursive: true })
+    const stage = path.join(outDir, 'stage')
+    if (job.mode === 'draft') await stageDraftProject(project, stage, included ?? new Set())
+    const input = job.mode === 'draft' ? path.join(stage, project.mainFile) : await safeFile(project.id, project.mainFile)
+    const args = ['-X', 'compile', '--untrusted', '--synctex', '--outdir', outDir, input]
+    const child = spawn(tectonicPath, args, { cwd: job.mode === 'draft' ? stage : dir, shell: false, windowsHide: true, env: { ...process.env, TECTONIC_UNTRUSTED_MODE: '1' } })
+    const append = (chunk: Buffer) => { job.log = (job.log + chunk.toString('utf8')).slice(-250_000) }
+    child.stdout.on('data', append)
+    child.stderr.on('data', append)
+    timer = setTimeout(() => { job.log += '\n编译超时（600 秒），已终止。'; child.kill() }, 600_000)
     const code = await new Promise<number>((resolve, reject) => {
       child.once('error', reject)
       child.once('close', code => resolve(code ?? -1))
@@ -562,11 +586,11 @@ async function runCompile(job: Job, project: Project): Promise<void> {
     if (code !== 0) fail(422, job.log || `Tectonic 退出代码：${code}`)
     const pdf = path.join(outDir, `${path.basename(project.mainFile, '.tex')}.pdf`)
     if (!existsSync(pdf)) fail(422, '编译完成，但未找到生成的 PDF')
-    const finalPdf = path.join(dir, '.openleaf', 'output.pdf')
+    const finalPdf = path.join(dir, '.openleaf', job.mode === 'draft' ? 'output-draft.pdf' : 'output.pdf')
     await copyFile(pdf, `${finalPdf}.tmp`)
     await rename(`${finalPdf}.tmp`, finalPdf)
     const sourceMap = path.join(outDir, `${path.basename(project.mainFile, '.tex')}.synctex.gz`)
-    const finalMap = path.join(dir, '.openleaf', 'output.synctex.gz')
+    const finalMap = path.join(dir, '.openleaf', job.mode === 'draft' ? 'output-draft.synctex.gz' : 'output.synctex.gz')
     if (existsSync(sourceMap)) {
       await copyFile(sourceMap, `${finalMap}.tmp`)
       await rename(`${finalMap}.tmp`, finalMap)
@@ -577,7 +601,7 @@ async function runCompile(job: Job, project: Project): Promise<void> {
     const detail = error instanceof Error ? error.message : String(error)
     if (!job.log.includes(detail)) job.log += `\n${detail}`
   } finally {
-    clearTimeout(timer)
+    if (timer) clearTimeout(timer)
     job.finishedAt = new Date().toISOString()
     activeProjects.delete(project.id)
     await rm(outDir, { recursive: true, force: true }).catch(() => {})
@@ -1011,6 +1035,20 @@ app.get<{ Params: { id: string } }>('/api/projects/:id/files', async request => 
   await getProject(request.params.id)
   return listProjectFiles(request.params.id)
 })
+app.get<{ Params: { id: string }; Querystring: { path: string } }>('/api/projects/:id/asset', async (request, reply) => {
+  await getProject(request.params.id)
+  const extension = path.extname(request.query.path || '').toLowerCase()
+  const mime: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.pdf': 'application/pdf' }
+  if (!mime[extension]) fail(415, '仅支持 PNG、JPEG 和 PDF 图片预览')
+  const file = await safeFile(request.params.id, request.query.path)
+  try {
+    if ((await stat(file)).size > 30 * 1024 * 1024) fail(413, '图片文件过大')
+    return reply.header('Cache-Control', 'private, max-age=60').header('X-Content-Type-Options', 'nosniff').type(mime[extension]).send(createReadStream(file))
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') fail(404, '图片文件不存在')
+    throw error
+  }
+})
 app.get<{ Params: { id: string }; Querystring: { path: string } }>('/api/projects/:id/file', async request => {
   await getProject(request.params.id)
   const file = await safeFile(request.params.id, request.query.path)
@@ -1342,16 +1380,78 @@ app.post<{ Params: { id: string } }>('/api/projects/:id/git/review-sync', async 
   catch (error) { fail(422, redactGitOutput(error instanceof Error ? error.message : String(error))) }
 })
 
-app.post<{ Params: { id: string } }>('/api/projects/:id/compile', async request => {
+app.post<{ Params: { id: string }; Body: { file: string; start: number; end: number; expected: string } }>('/api/projects/:id/card-preview', async request => {
   const project = await getProject(request.params.id)
   if (!existsSync(tectonicPath)) fail(503, '未找到 runtime/tectonic.exe')
-  if (activeProjects.has(project.id) || activeProjects.size >= 2) fail(409, '已有编译任务在运行')
+  const { file, start, end, expected } = request.body ?? {}
+  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end <= start || end - start > 500_000 || typeof expected !== 'string') fail(400, '无效的卡片范围')
+  const sourceFile = await safeFile(project.id, file)
+  if ((await stat(sourceFile)).size > 2 * 1024 * 1024) fail(413, '源码文件过大')
+  const source = await readFile(sourceFile, 'utf8')
+  const snippet = source.slice(start, end)
+  if (snippet !== expected || !/^\s*\\(?:begin\{(?:figure\*?|table\*?|longtable|tabular\*?|tabularx|center)\}|includegraphics\b)/.test(snippet)) fail(409, '卡片源码已变化，请刷新后重试')
+  const mainFile = await safeFile(project.id, project.mainFile)
+  if ((await stat(mainFile)).size > 2 * 1024 * 1024) fail(413, '主文件过大')
+  const main = await readFile(mainFile, 'utf8')
+  const begin = /\\begin\s*\{document\}/.exec(main)
+  if (!begin) fail(422, '主文件没有完整文档结构')
+  const preamble = main.slice(0, begin.index)
+  const dependencies = await Promise.all([...snippet.matchAll(/\\includegraphics(?:\[[^\]]*\])?\s*\{([^{}]+)\}/g)].map(async match => {
+    const candidate = match[1].replace(/\\/g, '/')
+    try { const file = await safeFile(project.id, candidate); const info = await stat(file); return `${candidate}:${info.size}:${info.mtimeMs}` }
+    catch { return `${candidate}:missing` }
+  }))
+  const key = createHash('sha256').update([preamble, snippet, ...dependencies].join('\0')).digest('hex').slice(0, 32)
+  const previewDir = path.join(projectDir(project.id), '.openleaf', 'card-preview')
+  const pdf = path.join(previewDir, `${key}.pdf`)
+  const url = `/api/projects/${project.id}/card-preview/${key}.pdf`
+  if (existsSync(pdf)) return { url, cached: true }
+  if (activeProjects.has(project.id) || activeCardPreviews.has(project.id) || activeCardPreviews.size >= 2) fail(409, '已有编译任务正在运行')
+  activeCardPreviews.add(project.id)
+  try {
+    await mkdir(previewDir, { recursive: true })
+    const input = path.join(previewDir, `${key}.tex`)
+    await writeFile(input, `${preamble}\n\\begin{document}\n${snippet}\n\\end{document}\n`, 'utf8')
+    const args = ['-X', 'compile', '--untrusted', '--outdir', previewDir, input]
+    const child = spawn(tectonicPath, args, { cwd: projectDir(project.id), shell: false, windowsHide: true, env: { ...process.env, TECTONIC_UNTRUSTED_MODE: '1' } })
+    let log = ''
+    child.stdout.on('data', chunk => { log = (log + chunk.toString('utf8')).slice(-12_000) })
+    child.stderr.on('data', chunk => { log = (log + chunk.toString('utf8')).slice(-12_000) })
+    const timer = setTimeout(() => child.kill(), 120_000)
+    let code: number
+    try { code = await new Promise<number>((resolve, reject) => { child.once('error', reject); child.once('close', value => resolve(value ?? -1)) }) }
+    finally { clearTimeout(timer) }
+    if (code !== 0 || !existsSync(pdf)) fail(422, `卡片独立编译失败；可使用完整项目编译。${log.slice(-1500)}`)
+    const cached = (await readdir(previewDir)).filter(name => /^[a-f0-9]{32}\.pdf$/.test(name))
+    if (cached.length > 40) {
+      const sorted = await Promise.all(cached.map(async name => ({ name, time: (await stat(path.join(previewDir, name))).mtimeMs })))
+      for (const item of sorted.sort((a, b) => b.time - a.time).slice(40)) { await rm(path.join(previewDir, item.name), { force: true }); await rm(path.join(previewDir, item.name.replace(/\.pdf$/, '.tex')), { force: true }) }
+    }
+    return { url, cached: false }
+  } finally { activeCardPreviews.delete(project.id) }
+})
+app.get<{ Params: { id: string; key: string } }>('/api/projects/:id/card-preview/:key', async (request, reply) => {
+  await getProject(request.params.id)
+  if (!/^[a-f0-9]{32}\.pdf$/.test(request.params.key)) fail(400, '无效的预览文件')
+  const file = path.join(projectDir(request.params.id), '.openleaf', 'card-preview', request.params.key)
+  if (!existsSync(file)) fail(404, '卡片预览不存在')
+  return reply.header('Cache-Control', 'private, max-age=60').type('application/pdf').send(createReadStream(file))
+})
+
+app.post<{ Params: { id: string }; Body: { mode?: 'full' | 'draft'; includeCards?: string[] } }>('/api/projects/:id/compile', async request => {
+  const project = await getProject(request.params.id)
+  if (!existsSync(tectonicPath)) fail(503, '未找到 runtime/tectonic.exe')
+  if (activeProjects.has(project.id) || activeCardPreviews.has(project.id) || activeProjects.size >= 2) fail(409, '已有编译任务在运行')
   const main = await safeFile(project.id, project.mainFile)
   if (!existsSync(main)) fail(404, '主文件不存在')
-  const job: Job = { id: randomUUID(), projectId: project.id, status: 'running', log: '', startedAt: new Date().toISOString() }
+  const mode = request.body?.mode === 'draft' ? 'draft' : 'full'
+  const cards = request.body?.includeCards ?? []
+  if (!Array.isArray(cards) || cards.length > 1000 || cards.some(card => typeof card !== 'string' || card.length > 500 || /[\x00-\x1f]/.test(card))) fail(400, '草稿编译卡片无效')
+  const included = new Set(cards)
+  const job: Job = { id: randomUUID(), projectId: project.id, status: 'running', log: '', startedAt: new Date().toISOString(), mode }
   jobs.set(job.id, job)
   activeProjects.add(project.id)
-  void runCompile(job, project)
+  void runCompile(job, project, included)
   return job
 })
 app.get<{ Params: { id: string; jobId: string } }>('/api/projects/:id/jobs/:jobId', async request => {
@@ -1360,21 +1460,23 @@ app.get<{ Params: { id: string; jobId: string } }>('/api/projects/:id/jobs/:jobI
   if (!job || job.projectId !== request.params.id) fail(404, '编译任务不存在')
   return job
 })
-app.get<{ Params: { id: string } }>('/api/projects/:id/pdf', async (request, reply) => {
+app.get<{ Params: { id: string }; Querystring: { mode?: string } }>('/api/projects/:id/pdf', async (request, reply) => {
   await getProject(request.params.id)
-  const file = path.join(projectDir(request.params.id), '.openleaf', 'output.pdf')
+  const file = path.join(projectDir(request.params.id), '.openleaf', request.query.mode === 'draft' ? 'output-draft.pdf' : 'output.pdf')
   if (!existsSync(file)) fail(404, '尚无成功编译的 PDF')
   return reply.header('Cache-Control', 'no-store').type('application/pdf').send(createReadStream(file))
 })
-app.get<{ Params: { id: string } }>('/api/projects/:id/synctex', async (request, reply) => {
+app.get<{ Params: { id: string }; Querystring: { mode?: string } }>('/api/projects/:id/synctex', async (request, reply) => {
   await getProject(request.params.id)
   const directory = projectDir(request.params.id)
-  const file = path.join(directory, '.openleaf', 'output.synctex.gz')
+  const isDraft = request.query.mode === 'draft'
+  const file = path.join(directory, '.openleaf', isDraft ? 'output-draft.synctex.gz' : 'output.synctex.gz')
   if (!existsSync(file)) fail(404, '当前 PDF 没有定位数据，请重新编译')
   const compressed = await readFile(file)
   if (compressed.length > 12 * 1024 * 1024) fail(413, '定位数据过大')
   const source = gunzipSync(compressed, { maxOutputLength: 80 * 1024 * 1024 }).toString('utf8')
-  return reply.header('Cache-Control', 'no-store').send({ points: parseSynctex(source, directory) })
+  const points = parseSynctex(source, directory).map(point => isDraft ? { ...point, file: point.file.replace(/^\.openleaf\/build\/[^/]+\/stage\//, '') } : point)
+  return reply.header('Cache-Control', 'no-store').send({ points })
 })
 
 app.post('/api/import', async request => {

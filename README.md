@@ -1,9 +1,11 @@
 <div align="center">
   <img src="icon.png" alt="TeXloom 图标" width="72" />
   <h1>TeXloom</h1>
-  <p>在浏览器中组织 LaTeX 项目、专注写作，并用本地 Tectonic 引擎生成 PDF。</p>
-  <p><strong>本地工作空间 · 即时预览 · GitHub 私有仓库协作</strong></p>
+  <p>在 Visual 模式中自然写作，随时切回 LaTeX 源码，并用本地 Tectonic 引擎生成 PDF。</p>
+  <p><strong>优雅的可视化编辑 · 源码完全可控 · 本地编译与协作</strong></p>
 </div>
+
+[在线浏览 TeXloom 产品介绍](https://stuboo3i.github.io/TeXloom/) · [查看 Visual 编辑模式](https://stuboo3i.github.io/TeXloom/#visual)
 
 ![TeXloom 产品首页：本地 LaTeX 工作台与源码、PDF 并排预览](docs/images/landing-hero.png)
 
@@ -15,12 +17,41 @@
 
 | 写作与预览 | 项目管理 | 协作与扩展 |
 | --- | --- | --- |
-| Monaco 语法着色与上下文补全、LaTeX 插入工具栏、PDF 预览与 SyncTeX 双向定位 | 项目分类与标签、批量导入导出、文件树、全文搜索、历史快照 | GitHub 私有仓库分支协作、评论与修改建议、本地及 DeepSeek 宏包推荐、可选 AI 写作助手 |
+| Code / Visual 双模式、Monaco 上下文补全、图表卡片、PDF 预览与 SyncTeX 双向定位 | 项目分类与标签、批量导入导出、文件树、全文搜索、历史快照 | GitHub 私有仓库分支协作、评论与修改建议、本地及 DeepSeek 宏包推荐、可选 AI 写作助手 |
+
+## Visual 可视化编辑
+
+在编辑器右上角切换 **Code / Visual**。Visual 把 LaTeX 文档呈现为易读的正文、标题、摘要、命题、证明、列表、公式和图表卡片。你可以直接点击文字修改；点击公式旁的铅笔编辑公式源码。行内与独立公式由本机打包的 KaTeX 预览，最终版式以 Tectonic 编译的 PDF 为准。
+
+### 三步开始写作
+
+1. 在工作台打开一个 `.tex` 项目，点击编辑器右上角的 **Visual**，在接近成稿的阅读视图中浏览文章。
+2. 点击正文、标题或公式旁的编辑入口就地修改；用工具栏插入格式、引用和图表。右侧 PDF 可与源码并排查看。
+3. 遇到复杂 LaTeX 结构时切回 **Code** 精确调整，保存后点击 **编译 PDF** 检查正式成稿。两种视图始终操作同一份源码。
+
+想先了解界面和工作方式，可打开 [Visual 在线介绍](https://stuboo3i.github.io/TeXloom/#visual)。该页面是静态产品展示；实际编辑、编译与项目管理需要在 Windows 本机运行 TeXloom。
+
+| 在 Visual 中 | 需要精确控制时 |
+| --- | --- |
+| 就地编辑正文与公式，工具栏按当前可见选区插入格式、引用、图片或表格 | 切回 Code 查看并修改完整 LaTeX 源码 |
+| 图表卡片可查看预览、评论、展开源码或单独编译 | 复杂命令与环境可在源码块中编辑；嵌套结构可直接在 Code 中处理 |
+| 与右侧 PDF 并排阅读；SyncTeX 可在正文与 PDF 之间定位 | 正式“编译 PDF”始终使用原始项目源码 |
+
+两种模式共用同一份源码、撤销记录、保存和编译流程。**仅切换视图不会重写文件**；Visual 编辑只替换对应的源码片段。`\label` 定位标记在 Visual 中隐藏，但仍保留在源码中。
+
+### 图表卡片与草稿 PDF
+
+- 图片和表格以卡片呈现，图注和表注会按正文、强调与公式渲染。图片预览按需加载；简单表格可直接查看结构预览。
+- “纳入草稿 PDF”用于控制草稿编译中的图表。未选中的普通 `figure`、`table` 和独立 `\includegraphics` 会在临时副本中变成占位框，便于快速检查文字与结构。
+- 草稿结果会单独标记；**正式“编译 PDF”使用完整源码**。`longtable` 及无法安全保留标题或标签的结构始终完整编译，项目源码与正式 PDF 不会被草稿模式覆盖。
+
+页面中的 Visual 示意使用通用示例；实际支持情况可在工作台中用自己的文档查看。
 
 ### 产品首页与工作台
 
 | 地址 | 用途 |
 | --- | --- |
+| [在线产品介绍](https://stuboo3i.github.io/TeXloom/) | GitHub Pages 静态展示页；可浏览 Visual、多人协作、本地管理与 AI 辅助的介绍 |
 | `http://127.0.0.1:3001/` | TeXloom 产品首页，介绍本地编译、双向定位、协作和开源特点 |
 | `http://127.0.0.1:3001/?view=workspace` | 实际使用页面：项目分类、导入导出和 LaTeX 编辑器 |
 
@@ -153,6 +184,7 @@ npm run dev
 - 顶部菜单集中管理文件、编辑、视图和项目操作。编辑器工具栏提供撤销、重做、标题、格式、公式、符号、链接、列表、引用、图片和表格等常用操作；操作作用于 Monaco 当前光标或选区，并可撤销。
 - 源码编辑器按光标位置补全常用 LaTeX 命令、数学符号、环境、宏包、项目标签、文献键、项目文件路径，以及当前文件定义的命令。标题、分式、图片等补全项提供可跳转的参数模板；注释和逐字环境内不会弹出 LaTeX 补全。项目标签和文献键会从当前项目的 `.tex`、`.bib` 文件读取。
 - LaTeX 命令、环境、标题、引用、公式、数字和注释会随网页颜色风格着色。
+- Visual 模式的正文、公式和图表编辑方式，以及草稿 PDF 与正式 PDF 的区别，见上面的 [Visual 可视化编辑](#visual-可视化编辑)。切换模式会保留阅读位置；工具栏还支持按设置中的颜色插入 LaTeX 高亮。
 - 编译后点击定位按钮，或按 `Ctrl+Alt+J`，可从源码跳转到 PDF；双击 PDF 页面可返回源码行。此功能依赖 SyncTeX 数据，已有的旧 PDF 需要重新编译。
 
 ### 引用、资源与检索
@@ -247,7 +279,7 @@ TeXloom 源码采用 MIT 许可证，见 `LICENSE`。第三方许可证与来源
 
 ```powershell
 npm run build
-npx tsx --test tests/editor-features.test.ts tests/synctex.test.ts tests/git-collab.test.ts tests/review-events.test.ts tests/latex-completion.test.ts tests/package-advice.test.ts
+npx tsx --test tests/editor-features.test.ts tests/synctex.test.ts tests/git-collab.test.ts tests/review-events.test.ts tests/latex-completion.test.ts tests/package-advice.test.ts tests/visual-latex.test.ts
 ```
 
 其他验证方式及其运行条件：

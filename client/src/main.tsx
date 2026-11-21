@@ -18,6 +18,9 @@ import { buildOutline, isSearchableFile, replaceSource, searchSources, type Outl
 import { applyAppearance, fontFamilies, readAppearance, saveAppearance, type Appearance } from './appearance'
 import { latexLanguageId, latexThemeName, registerLatexLanguage } from './latex-language'
 import { registerLatexCompletion, type CompletionContext } from './latex-completion'
+import { VisualEditor } from './visual-editor'
+import { highlightColors } from './highlight'
+import { draftCardKey, replaceSourceSpan, type SourceSpan, type VisualBlock } from './visual-latex'
 import './styles.css'
 import './preview.css'
 import './layout.css'
@@ -29,7 +32,7 @@ applyAppearance(readAppearance())
 
 type Project = { id: string; name: string; mainFile: string; createdAt: string; updatedAt: string; sharing?: 'personal' | 'shared'; archived?: boolean; tags?: string[] }
 type FileEntry = { path: string; type: 'file' | 'directory'; size?: number }
-type Job = { id: string; projectId: string; status: 'running' | 'success' | 'error'; log: string; startedAt: string; finishedAt?: string }
+type Job = { id: string; projectId: string; status: 'running' | 'success' | 'error'; log: string; startedAt: string; finishedAt?: string; mode?: 'full' | 'draft' }
 type Layout = 'split' | 'editor' | 'pdf'
 type SyncPoint = { file: string; line: number; page: number; x: number; y: number; kind: 'text' | 'box' }
 type PdfTarget = { page: number; x: number; y: number; serial: number }
@@ -44,7 +47,7 @@ async function api<T>(url: string, options?: RequestInit): Promise<T> {
 }
 const json = (method: string, body: unknown): RequestInit => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
 
-function PdfPreview({ projectId, version, target, onReverse }: { projectId: string; version: number; target?: PdfTarget | null; onReverse?: (page: number, x: number, y: number) => void }) {
+function PdfPreview({ projectId, version, mode = 'full', target, onReverse }: { projectId: string; version: number; mode?: 'full' | 'draft'; target?: PdfTarget | null; onReverse?: (page: number, x: number, y: number) => void }) {
   const canvas = useRef<HTMLCanvasElement>(null)
   const stage = useRef<HTMLDivElement>(null)
   const [pdf, setPdf] = useState<pdfjsLib.PDFDocumentProxy | null>(null)
@@ -58,10 +61,10 @@ function PdfPreview({ projectId, version, target, onReverse }: { projectId: stri
     let cancelled = false
     setPdf(null)
     setError('')
-    const task = pdfjsLib.getDocument({ url: `/api/projects/${projectId}/pdf?v=${version}`, withCredentials: false })
+    const task = pdfjsLib.getDocument({ url: `/api/projects/${projectId}/pdf?mode=${mode}&v=${version}`, withCredentials: false })
     task.promise.then(doc => { if (!cancelled) { setPdf(doc); setPage(1) } }).catch(() => { if (!cancelled) setError('尚无 PDF，点击“编译”生成预览。') })
     return () => { cancelled = true; void task.destroy() }
-  }, [projectId, version])
+  }, [projectId, version, mode])
 
   useEffect(() => {
     if (!stage.current) return
@@ -111,7 +114,7 @@ function PdfPreview({ projectId, version, target, onReverse }: { projectId: stri
   }
 
   return <section className="preview-pane">
-    <div className="pane-title"><div className="pane-title-label"><FileText size={17} /><strong>PDF 预览</strong><span className="pane-subtitle">编译结果</span></div><a className="icon-button" aria-label="下载 PDF" title="下载 PDF" href={`/api/projects/${projectId}/pdf?v=${version}`} download="document.pdf"><Download size={17} /></a></div>
+    <div className="pane-title"><div className="pane-title-label"><FileText size={17} /><strong>PDF 预览</strong><span className="pane-subtitle">{mode === 'draft' ? '草稿 · 图表占位' : '完整编译结果'}</span></div><a className="icon-button" aria-label="下载 PDF" title="下载 PDF" href={`/api/projects/${projectId}/pdf?mode=${mode}&v=${version}`} download={mode === 'draft' ? 'draft.pdf' : 'document.pdf'}><Download size={17} /></a></div>
     <div className="pdf-toolbar"><div className="page-control"><button onClick={() => setPage(Math.max(1, page - 1))} disabled={!pdf || page <= 1} aria-label="上一页"><ChevronLeft size={16} /></button><span>{pdf ? `${page} / ${pdf.numPages}` : '— / —'}</span><button onClick={() => setPage(Math.min(pdf?.numPages ?? 1, page + 1))} disabled={!pdf || page >= pdf.numPages} aria-label="下一页"><ChevronRight size={16} /></button></div><div className="zoom-control"><button onClick={() => setZoom(Math.max(.6, +(zoom - .1).toFixed(1)))} aria-label="缩小"><ZoomOut size={16} /></button><span>{Math.round(zoom * 100)}%</span><button onClick={() => setZoom(Math.min(2, +(zoom + .1).toFixed(1)))} aria-label="放大"><ZoomIn size={16} /></button></div>{onReverse && <span className="pdf-sync-hint">双击页面定位源码</span>}</div>
     <div ref={stage} className="pdf-stage">{pdf ? <div className="pdf-page-wrap"><canvas ref={canvas} className={`pdf-page ${onReverse ? 'reverse-enabled' : ''}`} title={onReverse ? '双击定位到源码' : undefined} onDoubleClick={reverseAt} />{target && rendered.page === target.page && <span key={target.serial} className="pdf-sync-marker" style={{ left: target.x * rendered.scale, top: target.y * rendered.scale }} />}</div> : <div className="pdf-empty"><div className="pdf-empty-icon"><FileText size={34} strokeWidth={1.5} /></div><strong>预览将在这里显示</strong><p>{error || '正在载入 PDF…'}</p></div>}</div>
   </section>
@@ -154,9 +157,18 @@ function App({ onExit }: { onExit: () => void }) {
   const [files, setFiles] = useState<FileEntry[]>([])
   const [activePath, setActivePath] = useState('')
   const [content, setContent] = useState('')
+  const [editorMode, setEditorMode] = useState<'code' | 'visual'>('code')
+  const [visualTarget, setVisualTarget] = useState<{ offset: number; serial: number } | null>(null)
+  const [visualLine, setVisualLine] = useState(1)
+  const [highlightColor, setHighlightColor] = useState(() => {
+    const saved = localStorage.getItem('texloom:highlight-color')
+    return highlightColors.find(color => color.latex === saved)?.latex ?? highlightColors[0].latex
+  })
   const [savedContent, setSavedContent] = useState('')
   const [job, setJob] = useState<Job | null>(null)
   const [pdfVersion, setPdfVersion] = useState(0)
+  const [pdfMode, setPdfMode] = useState<'full' | 'draft'>('full')
+  const [draftCards, setDraftCards] = useState<string[]>([])
   const [pdfTarget, setPdfTarget] = useState<PdfTarget | null>(null)
   const [showLogs, setShowLogs] = useState(false)
   const [showSidebar, setShowSidebar] = useState(true)
@@ -198,6 +210,10 @@ function App({ onExit }: { onExit: () => void }) {
   const aiTarget = useRef<{ path: string; selection: Monaco.Selection; original: string } | null>(null)
   const aiController = useRef<AbortController | null>(null)
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null)
+  const visualSelectionRef = useRef<SourceSpan | null>(null)
+  const visualViewportOffsetRef = useRef(0)
+  const visualTargetSerialRef = useRef(0)
+  useEffect(() => { visualSelectionRef.current = null }, [editorMode, activePath, project?.id])
   const completionContext = useRef<CompletionContext>({ references: [], citations: [], files: [] })
   completionContext.current = {
     references: [...references.filter(item => item.file !== activePath), ...(activePath.endsWith('.tex') ? [...content.matchAll(/\\label\{([^{}]+)\}/g)].map(match => ({ value: match[1], file: activePath })) : [])],
@@ -244,6 +260,11 @@ function App({ onExit }: { onExit: () => void }) {
   }, [])
 
   useEffect(() => { void refreshWorkspace(project?.id).catch(showError) }, [project?.id])
+  useEffect(() => {
+    if (!project) { setDraftCards([]); return }
+    try { const saved = JSON.parse(localStorage.getItem(`texloom:draft-cards:${project.id}`) || '[]'); setDraftCards(Array.isArray(saved) ? saved.filter((value): value is string => typeof value === 'string') : []) }
+    catch { setDraftCards([]) }
+  }, [project?.id])
   useEffect(() => {
     const close = (event: PointerEvent) => { if (!workspaceBadgeRef.current?.contains(event.target as Node)) setWorkspaceOpen(false) }
     document.addEventListener('pointerdown', close)
@@ -298,7 +319,7 @@ function App({ onExit }: { onExit: () => void }) {
       try {
         const next = await api<Job>(`/api/projects/${project.id}/jobs/${job.id}`)
         setJob(next)
-        if (next.status === 'success') { setPdfTarget(null); setPdfVersion(Date.now()); setShowLogs(false); void refreshProjects() }
+        if (next.status === 'success') { setPdfTarget(null); setPdfMode(next.mode === 'draft' ? 'draft' : 'full'); setPdfVersion(Date.now()); setShowLogs(false); void refreshProjects() }
         if (next.status === 'error') setShowLogs(true)
       } catch (error) { showError(error) }
     }, 700)
@@ -309,10 +330,10 @@ function App({ onExit }: { onExit: () => void }) {
     if (!project || !activePath) return true
     if (saveTimer.current) clearTimeout(saveTimer.current)
     const previous = saveInFlight.current
-    if (content === savedContent && !previous) return true
+    const source = editorMode === 'visual' && activePath.endsWith('.tex') ? editorRef.current?.getModel()?.getValue() ?? content : content
+    if (source === savedContent && !previous) return true
     const projectId = project.id
     const path = activePath
-    const source = content
     setSaving(true)
     const current = (async () => {
       if (previous) await previous
@@ -342,6 +363,7 @@ function App({ onExit }: { onExit: () => void }) {
     try {
       if (project && activePath && !(await saveCurrent(false))) return
       const data = await api<{ content: string }>(`/api/projects/${id}/file?path=${encodeURIComponent(file)}`)
+      visualSelectionRef.current = null
       setActivePath(file)
       setContent(data.content)
       setSavedContent(data.content)
@@ -354,6 +376,7 @@ function App({ onExit }: { onExit: () => void }) {
       setProject(item)
       setReviewThreads([]); setSnapshots([]); setGitState(null); setGitFeedback(null); setSearchHits([]); setAiOutput(null)
       setJob(null)
+      setPdfMode('full')
       setPdfVersion(Date.now())
       const projectFiles = await refreshFiles(item.id)
       const mainSize = projectFiles.find(file => file.path === item.mainFile)?.size ?? 0
@@ -397,13 +420,22 @@ function App({ onExit }: { onExit: () => void }) {
     try {
       if (autoCompileTimer.current) clearTimeout(autoCompileTimer.current)
       if (!(await saveCurrent(false))) return
-      await startCompile(project.id)
+      await startCompile(project.id, 'full')
     } catch (error) { showError(error) }
   }
 
-  async function startCompile(id: string) {
+  async function compileDraft() {
+    if (!project || busy) return
     try {
-      const next = await api<Job>(`/api/projects/${id}/compile`, { method: 'POST' })
+      if (autoCompileTimer.current) clearTimeout(autoCompileTimer.current)
+      if (!(await saveCurrent(false))) return
+      await startCompile(project.id, 'draft', draftCards)
+    } catch (error) { showError(error) }
+  }
+
+  async function startCompile(id: string, mode: 'full' | 'draft' = 'full', includeCards: string[] = []) {
+    try {
+      const next = await api<Job>(`/api/projects/${id}/compile`, json('POST', { mode, includeCards }))
       setJob(next)
       setShowLogs(true)
     } catch (error) { showError(error) }
@@ -481,9 +513,32 @@ function App({ onExit }: { onExit: () => void }) {
     saveAppearance(next)
   }
 
+  function changeHighlightColor(color: string) {
+    if (!highlightColors.some(option => option.latex === color)) return
+    setHighlightColor(color as typeof highlightColor)
+    localStorage.setItem('texloom:highlight-color', color)
+  }
+
+  function changeMode(next: 'code' | 'visual') {
+    if (next === editorMode) return
+    const editor = editorRef.current
+    const model = editor?.getModel()
+    if (next === 'visual' && editor && model) {
+      const line = editor.getVisibleRanges()[0]?.startLineNumber ?? editor.getPosition()?.lineNumber ?? 1
+      const offset = model.getOffsetAt({ lineNumber: line, column: 1 })
+      visualViewportOffsetRef.current = offset
+      setVisualTarget({ offset, serial: ++visualTargetSerialRef.current })
+    }
+    if (next === 'code' && editor && model) {
+      const position = model.getPositionAt(Math.min(visualViewportOffsetRef.current, model.getValueLength()))
+      requestAnimationFrame(() => { editor.revealPositionInCenter(position); editor.setPosition(position) })
+    }
+    setEditorMode(next)
+  }
+
   function openPdfTab() {
     if (!project) return
-    window.open(`/?view=pdf&project=${encodeURIComponent(project.id)}`, '_blank', 'noopener')
+    window.open(`/api/projects/${project.id}/pdf?mode=${pdfMode}`, '_blank', 'noopener')
   }
 
   const beforeEditorMount = (monaco: typeof Monaco) => {
@@ -497,6 +552,21 @@ function App({ onExit }: { onExit: () => void }) {
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyI, () => commandRef.current('italic'))
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => commandRef.current('save'))
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyJ, () => commandRef.current('sync:forward'))
+  }
+
+  function editVisualSpan(span: SourceSpan, expected: string, replacement: string) {
+    const editor = editorRef.current
+    const model = editor?.getModel()
+    if (!editor || !model) return
+    const source = model.getValue()
+    try {
+      const next = replaceSourceSpan(source, span, expected, replacement)
+      if (next === source) return
+      editor.pushUndoStop()
+      editor.executeEdits('visual', [{ range: { startLineNumber: model.getPositionAt(span.start).lineNumber, startColumn: model.getPositionAt(span.start).column, endLineNumber: model.getPositionAt(span.end).lineNumber, endColumn: model.getPositionAt(span.end).column }, text: replacement, forceMoveMarkers: true }])
+      editor.pushUndoStop()
+      setContent(model.getValue())
+    } catch (error) { showError(error) }
   }
 
   function replaceInEditor(range: Monaco.IRange, text: string, selectionStart = text.length, selectionEnd = selectionStart, extra?: { offset: number; text: string }) {
@@ -516,7 +586,7 @@ function App({ onExit }: { onExit: () => void }) {
     const from = model.getPositionAt(start + shift + selectionStart)
     const to = model.getPositionAt(start + shift + selectionEnd)
     editor.setSelection({ startLineNumber: from.lineNumber, startColumn: from.column, endLineNumber: to.lineNumber, endColumn: to.column })
-    editor.focus()
+    if (editorMode !== 'visual') editor.focus()
   }
 
   function selectedRange(): { editor: Monaco.editor.IStandaloneCodeEditor; model: Monaco.editor.ITextModel; range: Monaco.Selection; text: string } {
@@ -531,6 +601,35 @@ function App({ onExit }: { onExit: () => void }) {
     const { range, text } = selectedRange()
     const body = text || placeholder
     replaceInEditor(range, `${prefix}${body}${suffix}`, prefix.length, prefix.length + body.length)
+  }
+
+  async function insertHighlight() {
+    if (!project) throw new Error('请先打开项目')
+    const { range, text, model } = selectedRange()
+    const body = text || '高亮文字'
+    const multiline = /\r?\n/.test(body)
+    const markup = multiline
+      ? `\\noindent\\colorbox{${highlightColor}}{%\n\\parbox{\\dimexpr\\linewidth-2\\fboxsep\\relax}{%\n${body}%\n}%\n}`
+      : `\\colorbox{${highlightColor}}{${body}}`
+    const packagePresent = (source: string) => /\\usepackage(?:\[[^\]]*\])?\{[^}]*\bxcolor\b[^}]*\}/.test(source)
+    let extra: { offset: number; text: string } | undefined
+    if (activePath === project.mainFile) {
+      const source = model.getValue()
+      if (!packagePresent(source)) {
+        const offset = source.indexOf('\\begin{document}')
+        if (offset < 0) throw new Error('主文件没有 \\begin{document}')
+        extra = { offset, text: '\\usepackage{xcolor}\n' }
+      }
+    } else {
+      const url = `/api/projects/${project.id}/file?path=${encodeURIComponent(project.mainFile)}`
+      const main = await api<{ content: string }>(url)
+      if (!packagePresent(main.content)) {
+        const offset = main.content.indexOf('\\begin{document}')
+        if (offset < 0) throw new Error('主文件没有 \\begin{document}')
+        await api(url, json('PUT', { content: `${main.content.slice(0, offset)}\\usepackage{xcolor}\n${main.content.slice(offset)}` }))
+      }
+    }
+    replaceInEditor(range, markup, markup.indexOf(body), markup.indexOf(body) + body.length, extra)
   }
 
   function changeHeading(level: number) {
@@ -668,20 +767,30 @@ function App({ onExit }: { onExit: () => void }) {
     if (file !== activePath) await openFile(project.id, file)
     setTimeout(() => {
       const editor = editorRef.current
-      editor?.revealLineInCenter(line)
-      editor?.setPosition({ lineNumber: line, column })
-      editor?.focus()
+      const model = editor?.getModel()
+      if (editorMode === 'visual' && file.endsWith('.tex') && model) {
+        const offset = model.getOffsetAt({ lineNumber: Math.min(line, model.getLineCount()), column })
+        visualSelectionRef.current = { start: offset, end: offset }
+        visualViewportOffsetRef.current = offset
+        setVisualTarget({ offset, serial: ++visualTargetSerialRef.current })
+      } else {
+        editor?.revealLineInCenter(line)
+        editor?.setPosition({ lineNumber: line, column })
+        editor?.focus()
+      }
     }, 80)
   }
 
   async function currentSyncPoints(): Promise<SyncPoint[]> {
     if (!project) return []
-    const result = await api<{ points: SyncPoint[] }>(`/api/projects/${project.id}/synctex`)
+    const result = await api<{ points: SyncPoint[] }>(`/api/projects/${project.id}/synctex?mode=${pdfMode}`)
     return result.points
   }
 
   async function syncSourceToPdf() {
-    const line = editorRef.current?.getPosition()?.lineNumber
+    const model = editorRef.current?.getModel()
+    const visualOffset = visualSelectionRef.current?.start ?? visualViewportOffsetRef.current
+    const line = editorMode === 'visual' && model ? model.getPositionAt(Math.min(visualOffset, model.getValueLength())).lineNumber : editorRef.current?.getPosition()?.lineNumber
     if (!line || !activePath.endsWith('.tex')) { showError('请先在 LaTeX 源码中放置光标'); return }
     try {
       const matches = (await currentSyncPoints()).filter(point => point.file === activePath)
@@ -707,10 +816,47 @@ function App({ onExit }: { onExit: () => void }) {
 
   function openReview(type: 'comment' | 'suggestion') {
     try {
+      if (editorMode === 'visual' && !restoreVisualSelection(true)) return
       const { model, range, text } = selectedRange()
       if (type === 'suggestion' && !text) throw new Error('请先选中需要修改的源码')
       setReviewDraft({ type, file: activePath, line: range.startLineNumber, column: range.startColumn, offset: model.getOffsetAt(range.getStartPosition()), original: text })
     } catch (error) { showError(error) }
+  }
+
+  function reviewVisualCard(block: VisualBlock) {
+    const model = editorRef.current?.getModel()
+    if (!model) return
+    const start = block.caption?.start ?? block.start
+    const position = model.getPositionAt(start)
+    setReviewDraft({ type: 'comment', file: activePath, line: position.lineNumber, column: position.column, offset: start, original: model.getValue().slice(start, Math.min(block.caption?.end ?? start + 200, start + 20_000)) })
+  }
+
+  async function compileVisualCard(block: VisualBlock): Promise<string> {
+    if (!project) throw new Error('请先打开项目')
+    if (!(await saveCurrent(false))) throw new Error('保存失败，无法编译卡片')
+    const result = await api<{ url: string }>(`/api/projects/${project.id}/card-preview`, json('POST', { file: activePath, start: block.start, end: block.end, expected: block.raw }))
+    return result.url
+  }
+
+  function resolveVisualAsset(name: string): string {
+    const normalized = name.replace(/\\/g, '/')
+    const folder = activePath.includes('/') ? activePath.slice(0, activePath.lastIndexOf('/') + 1) : ''
+    const candidates = [normalized, `${folder}${normalized}`]
+    for (const candidate of candidates) for (const suffix of ['', '.png', '.jpg', '.jpeg', '.pdf']) {
+      const found = `${candidate}${suffix}`
+      if (files.some(file => file.type === 'file' && file.path === found)) return found
+    }
+    return normalized
+  }
+
+  function toggleDraftCard(block: VisualBlock) {
+    if (!project) return
+    const key = draftCardKey(activePath, block, content)
+    setDraftCards(previous => {
+      const next = previous.includes(key) ? previous.filter(item => item !== key) : [...previous, key]
+      localStorage.setItem(`texloom:draft-cards:${project.id}`, JSON.stringify(next))
+      return next
+    })
   }
 
   async function submitReview(body: string, proposed: string) {
@@ -825,6 +971,7 @@ function App({ onExit }: { onExit: () => void }) {
   async function requestAi(mode: string, prompt: string, imageDataUrl?: string, selectionOverride?: Monaco.Selection) {
     if (!project) return
     if (!aiSettings.configured) { setActivePanel('settings'); setAiError('请先配置 DeepSeek API Key'); return }
+    if (!selectionOverride && editorMode === 'visual') restoreVisualSelection(false)
     const editor = editorRef.current
     const model = editor?.getModel()
     const selection = selectionOverride ?? editor?.getSelection()
@@ -895,10 +1042,11 @@ function App({ onExit }: { onExit: () => void }) {
   function runEditorCommand(command: string): boolean {
     const editor = editorRef.current
     if (!editor) return false
-    if (command === 'undo' || command === 'redo') { editor.trigger('openleaf', command, null); editor.focus(); return true }
+    if (command === 'undo' || command === 'redo') { editor.trigger('openleaf', command, null); visualSelectionRef.current = null; if (editorMode !== 'visual') editor.focus(); return true }
     if (command === 'find') { void editor.getAction('actions.find')?.run(); return true }
     if (!activePath.endsWith('.tex')) throw new Error('该操作仅适用于 .tex 文件')
     if (command === 'bold') { wrapSelection('\\textbf{', '}', '文本'); return true }
+    if (command === 'highlight') { void insertHighlight().catch(showError); return true }
     if (command === 'italic') { wrapSelection('\\textit{', '}', '文本'); return true }
     if (command === 'insert:math') { wrapSelection('\\(', '\\)', 'x'); return true }
     if (command === 'insert:heading') { changeHeading(1); return true }
@@ -923,7 +1071,7 @@ function App({ onExit }: { onExit: () => void }) {
     if (command === 'more:0') { setActivePanel('ai'); setShowSidebar(true); return }
     if (command === 'more:1') { void requestAi('translate', '翻译选中的内容'); return }
     if (command === 'more:2') { void requestAi('explain', '解释选中的内容或编译错误'); return }
-    if (/^(undo|redo|find|bold|italic|insert:|style:|symbol:|image:|table:|list:)/.test(command)) {
+    if (/^(undo|redo|find|bold|highlight|italic|insert:|style:|symbol:|image:|table:|list:)/.test(command)) {
       try { if (runEditorCommand(command)) return } catch (error) { showError(error); return }
     }
     switch (command) {
@@ -939,7 +1087,7 @@ function App({ onExit }: { onExit: () => void }) {
       case 'toggleSidebar': setShowSidebar(value => !value); return
       case 'toggleLogs': setShowLogs(value => !value); return
       case 'pdfTab': openPdfTab(); return
-      case 'downloadPdf': if (project) window.open(`/api/projects/${project.id}/pdf?v=${pdfVersion}`, '_blank', 'noopener'); return
+      case 'downloadPdf': if (project) window.open(`/api/projects/${project.id}/pdf?mode=${pdfMode}&v=${pdfVersion}`, '_blank', 'noopener'); return
       case 'exportZip': if (project) window.location.href = `/api/projects/${project.id}/export`; return
       case 'rename': {
         if (!project) return
@@ -963,13 +1111,34 @@ function App({ onExit }: { onExit: () => void }) {
     }
   }
 
+  function handleVisualToolbarCommand(command: string) {
+    if (editorMode === 'visual' && activePath.endsWith('.tex') && /^(bold|highlight|italic|insert:|style:|symbol:|image:|table:|list:|comment$)/.test(command)) {
+      if (!restoreVisualSelection(true)) return
+      if (command !== 'comment') visualSelectionRef.current = null
+    }
+    handleCommand(command)
+  }
+
+  function restoreVisualSelection(required: boolean): boolean {
+    const span = visualSelectionRef.current
+    const model = editorRef.current?.getModel()
+    if (!span || !model || span.end > model.getValueLength()) {
+      if (required) showError('请先在可视化正文中放置光标或选择文字')
+      return false
+    }
+    const from = model.getPositionAt(span.start)
+    const to = model.getPositionAt(span.end)
+    editorRef.current?.setSelection({ startLineNumber: from.lineNumber, startColumn: from.column, endLineNumber: to.lineNumber, endColumn: to.column })
+    return true
+  }
+
   commandRef.current = handleCommand
 
   return <div className="app-shell">
     <header className="topbar"><button className="brand" onClick={() => { if (project) void goHome(); else onExit() }}><span className="brand-mark"><img src="/icon.png" alt="" /></span><span className="brand-name">TeXloom</span></button>{project && <WorkspaceMenuBar onCommand={handleCommand} />}<div className="topbar-right"><div className="workspace-location" ref={workspaceBadgeRef}><button className="local-badge" type="button" aria-expanded={workspaceOpen} onClick={() => { setWorkspaceOpen(value => !value); void refreshWorkspace(project?.id).catch(showError) }}><span className="local-dot" />本地工作空间<ChevronDown size={14} /></button>{workspaceOpen && <div className="workspace-location-menu"><h3>项目存储位置</h3>{project && <><label>当前项目文件夹</label><code>{workspaceInfo?.projectPath || '读取中…'}</code></>}<label>{project ? '当前项目所在根目录' : '当前项目根目录'}</label><code>{project ? workspaceInfo?.projectRoot || '读取中…' : workspaceInfo?.root || '读取中…'}</code>{project && workspaceInfo?.projectRoot !== workspaceInfo?.root && <><label>新项目根目录</label><code>{workspaceInfo?.root}</code></>}<p>更换根目录后，新项目保存在新位置；已有项目仍在原位置。</p><button type="button" onClick={() => { setWorkspaceOpen(false); setRootDialog('change') }}><FolderOpen size={15} />修改根目录</button></div>}</div><a className="top-help" href="https://tectonic-typesetting.github.io/book/latest/" target="_blank" rel="noreferrer"><CircleHelp size={17} />帮助文档</a></div></header>
     {project ? <div className="workspace">
-      {showSidebar && <WorkspaceSidebar project={project} files={files} activePath={activePath} activePanel={activePanel} outline={outline} searchHits={searchHits} searchBusy={searchBusy} searchError={searchError} reviewThreads={reviewThreads} snapshots={snapshots} gitState={gitState} gitFeedback={gitFeedback} aiSettings={aiSettings} aiOutput={aiOutput} aiBusy={aiBusy} aiError={aiError} editorFontSize={editorFontSize} editorWrap={editorWrap} autoCompile={autoCompile} appearance={appearance} onPanelChange={setActivePanel} onCommand={handleCommand} onOpenFile={file => void openFile(project.id, file)} onDeleteFile={file => void deleteFile(file)} onNavigate={(file, line, column) => void navigateTo(file, line, column)} onSearch={options => void searchProject(options)} onReplaceAll={(replacement, options) => void replaceAllInProject(replacement, options)} onAddReview={openReview} onReviewAction={(id, action, body) => void reviewAction(id, action, body)} onCreateSnapshot={note => void createProjectSnapshot(note)} onRestoreSnapshot={id => void restoreProjectSnapshot(id)} onGitAction={gitAction} onGitBranchChange={changeGitBranch} onReviewReload={reloadReview} onAiRequest={(mode, prompt) => void requestAi(mode, prompt)} onAiApply={() => setAiDiffOpen(true)} onAiCancel={() => aiController.current?.abort()} onSaveAiSettings={settings => void saveAiSettings(settings)} onEditorPreferences={changeEditorPreferences} onAutoCompile={changeAutoCompile} onAppearanceChange={changeAppearance} onPackageEnsureSaved={() => saveCurrent(false)} onPackageSelectedText={() => { const editor = editorRef.current; const selection = editor?.getSelection(); return editor && selection ? editor.getModel()?.getValueInRange(selection) ?? '' : '' }} onPackageApplied={(file, source) => { if (file === activePath) { setContent(source); setSavedContent(source) } void refreshProjects() }} />}
-      <main className="work-main"><div className="workspace-toolbar"><div className="crumbs">{!showSidebar && <button className="icon-button" onClick={() => setShowSidebar(true)} title="展开侧边栏"><PanelLeftOpen size={18} /></button>}<span>{project.name}</span><ChevronRight size={15} /><strong>{activePath || project.mainFile}</strong></div><div className="workspace-actions"><LayoutPicker layout={layout} onChoose={chooseLayout} onOpenTab={openPdfTab} /><span className="save-state">{saving ? <><LoaderCircle size={14} className="spin" />保存中</> : dirty ? <><span className="unsaved-dot" />未保存</> : <><Save size={14} />已保存</>}</span><button className="soft-button" onClick={() => void saveCurrent()}><Save size={15} />保存</button><button className={`auto-button ${autoCompile ? 'on' : ''}`} onClick={() => changeAutoCompile(!autoCompile)} title={`自动编译：${autoCompile ? '开启' : '关闭'}`} aria-label={`自动编译：${autoCompile ? '开启' : '关闭'}`}><RefreshCw size={16} /></button><button className="primary-button" onClick={() => void compile()} disabled={busy || !tectonicReady}>{busy ? <LoaderCircle size={16} className="spin" /> : <Play size={16} fill="currentColor" />}{busy ? '编译中' : '编译 PDF'}</button></div></div><div ref={splitRef} className={`editor-preview layout-${layout}`} style={{ '--editor-percent': `${splitPercent}%` } as React.CSSProperties}><section className="editor-pane"><div className="pane-title"><div className="pane-title-label"><Code2 size={17} /><strong>源文件</strong><span className="pane-subtitle">{activePath}</span></div><span className="editor-type">{activePath.endsWith('.tex') ? 'LaTeX' : '文本'}</span></div><EditorToolbar onCommand={handleCommand} /><div className="editor-wrap"><Editor path={activePath} language={activePath.endsWith('.tex') ? latexLanguageId : 'plaintext'} value={content} onChange={value => setContent(value ?? '')} beforeMount={beforeEditorMount} onMount={onEditorMount} theme={latexThemeName(appearance.theme)} options={{ fontSize: Math.round(editorFontSize * appearance.size / 14), lineHeight: Math.round(24 * appearance.size / 14), minimap: { enabled: false }, wordWrap: editorWrap, automaticLayout: true, scrollBeyondLastLine: false, padding: { top: 18 }, fontFamily: fontFamilies[appearance.font], renderLineHighlight: 'line', lineNumbersMinChars: 3 }} /></div></section><div className="pane-resizer" role="separator" aria-label="调整编辑器与 PDF 宽度" aria-orientation="vertical" aria-valuemin={20} aria-valuemax={80} aria-valuenow={splitPercent} tabIndex={layout === 'split' ? 0 : -1} onPointerDown={resizeSplit} onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) updateSplit(event.clientX) }} onPointerUp={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) { persistSplit(updateSplit(event.clientX)); event.currentTarget.releasePointerCapture(event.pointerId) } }} onKeyDown={event => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); const value = Math.max(20, Math.min(80, splitPercent + (event.key === 'ArrowLeft' ? -2 : 2))); setSplitPercent(value); persistSplit(value) } }} onDoubleClick={() => { setSplitPercent(50); persistSplit(50) }} /><PdfPreview projectId={project.id} version={pdfVersion} target={pdfTarget} onReverse={syncPdfToSource} /></div><div className={`log-panel ${showLogs ? 'open' : ''}`}><button className="log-heading" onClick={() => setShowLogs(!showLogs)}><div><span className={`compile-indicator ${job?.status || ''}`} />编译日志{job && <span className="log-status">{job.status === 'running' ? '正在编译' : job.status === 'success' ? '编译成功' : '编译失败'}</span>}</div><ChevronDown size={16} className={showLogs ? 'flip' : ''} /></button>{showLogs && <pre>{job?.log || (busy ? '正在启动 Tectonic…' : '暂无编译记录')}</pre>}</div></main>
+      {showSidebar && <WorkspaceSidebar project={project} files={files} activePath={activePath} activePanel={activePanel} outline={outline} activeOutlineLine={visualLine} searchHits={searchHits} searchBusy={searchBusy} searchError={searchError} reviewThreads={reviewThreads} snapshots={snapshots} gitState={gitState} gitFeedback={gitFeedback} aiSettings={aiSettings} aiOutput={aiOutput} aiBusy={aiBusy} aiError={aiError} editorFontSize={editorFontSize} editorWrap={editorWrap} autoCompile={autoCompile} appearance={appearance} highlightColor={highlightColor} onHighlightColor={changeHighlightColor} onPanelChange={setActivePanel} onCommand={handleCommand} onOpenFile={file => void openFile(project.id, file)} onDeleteFile={file => void deleteFile(file)} onNavigate={(file, line, column) => void navigateTo(file, line, column)} onSearch={options => void searchProject(options)} onReplaceAll={(replacement, options) => void replaceAllInProject(replacement, options)} onAddReview={openReview} onReviewAction={(id, action, body) => void reviewAction(id, action, body)} onCreateSnapshot={note => void createProjectSnapshot(note)} onRestoreSnapshot={id => void restoreProjectSnapshot(id)} onGitAction={gitAction} onGitBranchChange={changeGitBranch} onReviewReload={reloadReview} onAiRequest={(mode, prompt) => void requestAi(mode, prompt)} onAiApply={() => setAiDiffOpen(true)} onAiCancel={() => aiController.current?.abort()} onSaveAiSettings={settings => void saveAiSettings(settings)} onEditorPreferences={changeEditorPreferences} onAutoCompile={changeAutoCompile} onAppearanceChange={changeAppearance} onPackageEnsureSaved={() => saveCurrent(false)} onPackageSelectedText={() => { const editor = editorRef.current; const selection = editor?.getSelection(); return editor && selection ? editor.getModel()?.getValueInRange(selection) ?? '' : '' }} onPackageApplied={(file, source) => { if (file === activePath) { setContent(source); setSavedContent(source) } void refreshProjects() }} />}
+      <main className="work-main"><div className="workspace-toolbar"><div className="crumbs">{!showSidebar && <button className="icon-button" onClick={() => setShowSidebar(true)} title="展开侧边栏"><PanelLeftOpen size={18} /></button>}<span>{project.name}</span><ChevronRight size={15} /><strong>{activePath || project.mainFile}</strong></div><div className="workspace-actions"><LayoutPicker layout={layout} onChoose={chooseLayout} onOpenTab={openPdfTab} /><span className="save-state">{saving ? <><LoaderCircle size={14} className="spin" />保存中</> : dirty ? <><span className="unsaved-dot" />未保存</> : <><Save size={14} />已保存</>}</span><button className="soft-button" onClick={() => void saveCurrent()}><Save size={15} />保存</button><button className={`auto-button ${autoCompile ? 'on' : ''}`} onClick={() => changeAutoCompile(!autoCompile)} title={`自动编译：${autoCompile ? '开启' : '关闭'}`} aria-label={`自动编译：${autoCompile ? '开启' : '关闭'}`}><RefreshCw size={16} /></button><button className="soft-button" onClick={() => void compileDraft()} disabled={busy || !tectonicReady} title="未勾选的图表在草稿 PDF 中显示占位框">草稿编译</button><button className="primary-button" onClick={() => void compile()} disabled={busy || !tectonicReady}>{busy ? <LoaderCircle size={16} className="spin" /> : <Play size={16} fill="currentColor" />}{busy ? '编译中' : '编译 PDF'}</button></div></div><div ref={splitRef} className={`editor-preview layout-${layout}`} style={{ '--editor-percent': `${splitPercent}%` } as React.CSSProperties}><section className="editor-pane"><div className="pane-title"><div className="pane-title-label"><Code2 size={17} /><strong>源文件</strong><span className="pane-subtitle">{activePath}</span></div><div className="editor-mode-switch" role="tablist" aria-label="编辑模式"><button type="button" role="tab" aria-selected={editorMode === 'code'} className={editorMode === 'code' ? 'active' : ''} onClick={() => changeMode('code')}>Code</button><button type="button" role="tab" aria-selected={editorMode === 'visual'} className={editorMode === 'visual' ? 'active' : ''} disabled={!activePath.endsWith('.tex')} onClick={() => changeMode('visual')}>Visual</button></div></div><EditorToolbar onCommand={handleVisualToolbarCommand} /><div className="editor-wrap" style={{ display: editorMode === 'visual' && activePath.endsWith('.tex') ? 'none' : undefined }}><Editor path={activePath} language={activePath.endsWith('.tex') ? latexLanguageId : 'plaintext'} value={content} onChange={value => setContent(value ?? '')} beforeMount={beforeEditorMount} onMount={onEditorMount} theme={latexThemeName(appearance.theme)} options={{ fontSize: Math.round(editorFontSize * appearance.size / 14), lineHeight: Math.round(24 * appearance.size / 14), minimap: { enabled: false }, wordWrap: editorWrap, automaticLayout: true, scrollBeyondLastLine: false, padding: { top: 18 }, fontFamily: fontFamilies[appearance.font], renderLineHighlight: 'line', lineNumbersMinChars: 3 }} /></div>{editorMode === 'visual' && activePath.endsWith('.tex') && <VisualEditor source={content} projectId={project.id} file={activePath} draftCards={draftCards} onToggleDraft={toggleDraftCard} assetPath={resolveVisualAsset} onCompileCard={compileVisualCard} onReviewCard={reviewVisualCard} onEdit={editVisualSpan} onUndo={() => editorRef.current?.trigger('visual', 'undo', null)} onRedo={() => editorRef.current?.trigger('visual', 'redo', null)} onFocus={() => editorRef.current?.pushUndoStop()} onBlur={() => editorRef.current?.pushUndoStop()} onSelection={span => { visualSelectionRef.current = span }} onViewport={offset => { visualViewportOffsetRef.current = offset; const line = editorRef.current?.getModel()?.getPositionAt(offset).lineNumber; if (line) setVisualLine(line) }} target={visualTarget} />}</section><div className="pane-resizer" role="separator" aria-label="调整编辑器与 PDF 宽度" aria-orientation="vertical" aria-valuemin={20} aria-valuemax={80} aria-valuenow={splitPercent} tabIndex={layout === 'split' ? 0 : -1} onPointerDown={resizeSplit} onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) updateSplit(event.clientX) }} onPointerUp={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) { persistSplit(updateSplit(event.clientX)); event.currentTarget.releasePointerCapture(event.pointerId) } }} onKeyDown={event => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); const value = Math.max(20, Math.min(80, splitPercent + (event.key === 'ArrowLeft' ? -2 : 2))); setSplitPercent(value); persistSplit(value) } }} onDoubleClick={() => { setSplitPercent(50); persistSplit(50) }} /><PdfPreview projectId={project.id} version={pdfVersion} mode={pdfMode} target={pdfTarget} onReverse={syncPdfToSource} /></div><div className={`log-panel ${showLogs ? 'open' : ''}`}><button className="log-heading" onClick={() => setShowLogs(!showLogs)}><div><span className={`compile-indicator ${job?.status || ''}`} />编译日志{job && <span className="log-status">{job.status === 'running' ? '正在编译' : job.status === 'success' ? '编译成功' : '编译失败'}</span>}</div><ChevronDown size={16} className={showLogs ? 'flip' : ''} /></button>{showLogs && <pre>{job?.log || (busy ? '正在启动 Tectonic…' : '暂无编译记录')}</pre>}</div></main>
     </div> : <Dashboard projects={projects} onOpen={item => void openProject(item)} onRefresh={refreshProjects} onCreate={() => void beginNewProject()} onImportZip={() => importRef.current?.click()} onClone={() => { setModal('clone'); setModalValue('') }} />}
 
     <input ref={uploadRef} type="file" hidden onChange={event => { const file = event.target.files?.[0]; if (file) void upload(file); event.target.value = '' }} /><input ref={importRef} type="file" accept=".zip" hidden onChange={event => { const file = event.target.files?.[0]; if (file) void importZip(file); event.target.value = '' }} />
