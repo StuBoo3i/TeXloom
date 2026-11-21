@@ -82,6 +82,11 @@ function ProductPreview() {
 export function Landing({ onEnter }: { onEnter: () => void }) {
   const pageRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
+    const roots = [document.documentElement, document.body, document.getElementById('root')]
+    roots.forEach(root => root?.classList.add('landing-scroll-enabled'))
+    return () => roots.forEach(root => root?.classList.remove('landing-scroll-enabled'))
+  }, [])
+  useEffect(() => {
     const page = pageRef.current
     if (!page || !('IntersectionObserver' in window)) return
     const items = [...page.querySelectorAll<HTMLElement>('.lp-reveal')]
