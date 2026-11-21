@@ -10,10 +10,10 @@ async function api(method, path, body) {
 }
 
 const initial = await api('GET', '/api/ai/settings')
-if (initial.configured) throw new Error('已有 API Key，跳过测试以避免覆盖用户设置')
+if (initial.profiles.deepseek.configured) throw new Error('已有 DeepSeek API Key，跳过测试以避免覆盖用户设置')
 const sampleKey = `texloom-test-${Date.now()}`
 try {
-  const updated = await api('PUT', '/api/ai/settings', { apiKey: sampleKey, model: 'deepseek-flash', maxOutputTokens: 512, timeoutSeconds: 30 })
+  const updated = await api('PUT', '/api/ai/settings', { provider: 'deepseek', apiKey: sampleKey, model: 'deepseek-flash', maxOutputTokens: 512, timeoutSeconds: 30 })
   assert.equal(updated.configured, true)
   assert.equal(updated.apiKey, undefined)
   assert.equal((await api('GET', '/api/ai/settings')).configured, true)
@@ -21,5 +21,6 @@ try {
   assert.ok(!localFile.includes(sampleKey))
   console.log('AI settings encryption and redaction checks passed')
 } finally {
-  await api('PUT', '/api/ai/settings', { clearKey: true, model: initial.model, maxOutputTokens: initial.maxOutputTokens, timeoutSeconds: initial.timeoutSeconds })
+  await api('PUT', '/api/ai/settings', { provider: 'deepseek', clearKey: true, model: initial.profiles.deepseek.model, maxOutputTokens: initial.profiles.deepseek.maxOutputTokens, timeoutSeconds: initial.profiles.deepseek.timeoutSeconds })
+  if (initial.provider !== 'deepseek') await api('PUT', '/api/ai/settings', { provider: initial.provider, model: initial.model, maxOutputTokens: initial.maxOutputTokens, timeoutSeconds: initial.timeoutSeconds })
 }

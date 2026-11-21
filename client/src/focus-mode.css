@@ -1,0 +1,20 @@
+.focus-toggle{display:inline-flex;align-items:center;gap:5px;flex:none;height:27px;margin-left:9px;padding:0 9px;border:1px solid var(--theme-accent-border,#c9ddea);border-radius:6px;background:var(--theme-accent-soft,#edf5fa);color:var(--theme-accent-strong,#285f89);font:700 11px var(--ui-font-family,system-ui);cursor:pointer}
+.focus-toggle:hover,.focus-toggle.active{background:var(--theme-accent,#286799);color:#fff}
+.focus-toggle kbd{font:10px Consolas,monospace;opacity:.8}
+.visual-workspace:not(.focus-mode) .topbar{height:58px}
+.visual-workspace:not(.focus-mode) .workspace-toolbar{height:49px}
+.visual-workspace:not(.focus-mode) .editor-pane .pane-title{height:36px}
+.visual-workspace:not(.focus-mode) .editor-toolbar{min-height:38px;padding-block:2px}
+.focus-mode .topbar,.focus-mode .workspace-toolbar,.focus-mode .preview-pane,.focus-mode .pane-resizer,.focus-mode .log-panel{display:none!important}
+.focus-mode .workspace{flex:1;min-height:0}
+.focus-mode .work-main,.focus-mode .editor-preview{flex:1;min-height:0}
+.focus-mode .editor-pane,.focus-mode .editor-preview.layout-pdf .editor-pane{display:flex!important;flex:1 1 auto!important;width:100%!important;border:0}
+.focus-mode .editor-pane .pane-title{height:38px}
+.focus-mode .editor-toolbar{min-height:38px;padding-block:2px}
+.focus-mode .visual-page{width:min(calc(100% - 36px),1340px);padding-inline:clamp(28px,5vw,88px);margin-top:8px}
+.focus-mode .focus-toggle{margin-right:4px}
+:root[data-theme=night] .focus-toggle{background:#27384e;color:#dce7f3;border-color:#45617d}
+:root[data-theme=night] .focus-toggle:hover,:root[data-theme=night] .focus-toggle.active{background:#426d9e;color:#fff}
+:root[data-theme=eye] .focus-toggle{background:#def1e1;color:#2e6548;border-color:#9bcba7}
+:root[data-theme=eye] .focus-toggle:hover,:root[data-theme=eye] .focus-toggle.active{background:#3f8060;color:#fff}
+@media(max-width:700px){.focus-mode .visual-page{width:calc(100% - 12px);padding-inline:18px}.focus-toggle kbd{display:none}}

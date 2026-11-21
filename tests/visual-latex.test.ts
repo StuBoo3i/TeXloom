@@ -25,7 +25,7 @@ test('解析可视化结构时保留原始字节与可回溯位置', () => {
   const doc = parseVisualLatex(sample)
   assert.equal(doc.source, sample)
   assert.ok(doc.documentFound)
-  assert.deepEqual(doc.blocks.map(block => block.kind), ['source', 'heading', 'paragraph', 'list', 'math', 'source', 'source'])
+  assert.deepEqual(doc.blocks.map(block => block.kind), ['source', 'heading', 'paragraph', 'blank', 'list', 'math', 'source', 'source'])
   for (const block of doc.blocks) assert.equal(sample.slice(block.start, block.end), block.raw)
   const heading = doc.blocks.find(block => block.kind === 'heading')!
   assert.equal(sample.slice(heading.title!.start, heading.title!.end), '研究\\textbf{背景}')
@@ -45,6 +45,19 @@ test('局部修改只替换目标片段，其他源码及换行保持不变', ()
   assert.equal(next, sample.replace('\\emph{重点}', '\\emph{关键内容}'))
   assert.equal(parseVisualLatex(next).blocks.find(block => block.kind === 'list')?.items?.length, 2)
   assert.throws(() => replaceSourceSpan(next, text, text.raw, '错误覆盖'))
+})
+
+test('空行保留独立插入位置及原有换行符', () => {
+  const source = '\\begin{document}\r\n\\section{标题}\r\n\r\n  \r\n第一段\r\n\r\n第二段\r\n\\end{document}'
+  const blanks = parseVisualLatex(source).blocks.filter(block => block.kind === 'blank')
+  assert.deepEqual(blanks.map(block => block.raw), ['\r\n', '  \r\n', '\r\n'])
+  assert.deepEqual(blanks.map(block => source.slice(block.content!.start, block.content!.end)), ['', '  ', ''])
+  const inserted = replaceSourceSpan(source, blanks[0].content!, '', '新增内容')
+  assert.ok(inserted.includes('\\section{标题}\r\n新增内容\r\n  \r\n第一段'))
+  assert.equal(parseVisualLatex(inserted).blocks.filter(block => block.kind === 'blank').length, 2)
+  const deleted = replaceSourceSpan(source, blanks[0], blanks[0].raw, '')
+  assert.ok(deleted.includes('\\section{标题}\r\n  \r\n第一段'))
+  assert.equal(parseVisualLatex(deleted).blocks.filter(block => block.kind === 'blank').length, 2)
 })
 
 test('未闭合或不支持的内容显示源码块', () => {
@@ -82,6 +95,15 @@ test('Visual 选区转换回源码位置时保留转义字符偏移', () => {
   assert.equal(sourceOffsetForVisible('a\r\nb', 2), 3)
   assert.equal(sourceOffsetForVisible('abc', 3), 3)
   assert.equal(visibleOffsetForSource('甲\\%乙', 3), 2)
+})
+
+test('跨公式选区使用完整 LaTeX 源码而非渲染文本', () => {
+  const source = '\\begin{document}\n公式前 $x^2+y^2=z^2$ 公式后。\n\\end{document}'
+  const paragraph = parseVisualLatex(source).blocks.find(block => block.kind === 'paragraph')!
+  const nodes = paragraph.children!
+  const formula = nodes.find(node => node.kind === 'math')!
+  assert.equal(source.slice(formula.start, formula.end), '$x^2+y^2=z^2$')
+  assert.equal(source.slice(nodes[0].start, nodes.at(-1)!.end), '公式前 $x^2+y^2=z^2$ 公式后。\n')
 })
 
 test('标题、摘要和命题证明以正文显示且保留源码范围', () => {

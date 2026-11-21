@@ -2,14 +2,14 @@
   <img src="icon.png" alt="TeXloom 图标" width="72" />
   <h1>TeXloom</h1>
   <p>在 Visual 模式中自然写作，随时切回 LaTeX 源码，并用本地 Tectonic 引擎生成 PDF。</p>
-  <p><strong>优雅的可视化编辑 · 源码完全可控 · 本地编译与协作</strong></p>
+  <p><strong>可视化写作 · 本地编译 · 多服务商智能助手接力</strong></p>
 </div>
 
-[在线浏览 TeXloom 产品介绍](https://stuboo3i.github.io/TeXloom/) · [查看 Visual 编辑模式](https://stuboo3i.github.io/TeXloom/#visual)
+[在线浏览 TeXloom 产品介绍](https://stuboo3i.github.io/TeXloom/) · [查看 Visual 编辑模式](https://stuboo3i.github.io/TeXloom/#visual) · [了解多服务商 AI](https://stuboo3i.github.io/TeXloom/#ai)
 
 ![TeXloom 产品首页：本地 LaTeX 工作台与源码、PDF 并排预览](docs/images/landing-hero.png)
 
-> TeXloom 面向 Windows 单用户桌面环境。项目文件保存在本机；只有你主动使用 Git 协作时，所选项目的源码才会同步到对应远程仓库。
+> TeXloom 面向 Windows 单用户桌面环境。项目文件保存在本机；你主动使用 AI 时，所选内容和请求会交给对应服务商，主动使用 Git 同步时项目源码才会推送到远程仓库。
 
 ## 功能一览
 
@@ -17,7 +17,18 @@
 
 | 写作与预览 | 项目管理 | 协作与扩展 |
 | --- | --- | --- |
-| Code / Visual 双模式、Monaco 上下文补全、图表卡片、PDF 预览与 SyncTeX 双向定位 | 项目分类与标签、批量导入导出、文件树、全文搜索、历史快照 | GitHub 私有仓库分支协作、评论与修改建议、本地及 DeepSeek 宏包推荐、可选 AI 写作助手 |
+| Code / Visual 双模式、Monaco 上下文补全、图表卡片、PDF 预览与 SyncTeX 双向定位 | 项目分类与标签、批量导入导出、文件树、全文搜索、历史快照 | GitHub 私有仓库分支协作与审阅；Agent CLI 支持多服务商、多账号接力，AI API 提供写作与宏包工具 |
+
+## 一份论文，多位智能助手
+
+TeXloom 把 AI 放进真实的 LaTeX 项目流程。你可以选定项目文件，让 Agent 分析论证、检查引用或提出源码修改；切换服务商或账号后，可将近期项目对话作为下一轮的背景。每个 Agent 仍保留自己的原生会话，便于围绕同一篇文章持续工作。
+
+| 项目级 Agent CLI | 选区级 AI API |
+| --- | --- |
+| **Codex CLI、Gemini CLI、Claude Code、豆包 CLI**；按项目共享本地对话，可配置账号、模型、超时及支持的智能程度 | **DeepSeek、火山引擎 Ark、阿里云百炼、OpenAI GPT、Claude**；按需调用翻译、润色、报错解释、公式、表格与宏包建议 |
+| 选择文件作为上下文；Agent 在工作副本中提出修改，先展示差异，确认后才写回项目 | 选中源码或输入要求，预览结果后再应用；密钥由本机加密保存 |
+
+例如：先用 Codex 检查证明结构，再切换 Gemini 核对叙述，最后用 Claude Code 或豆包 CLI 继续讨论。**这是由你主动切换的协作流程，不会自动调用全部服务商。**跨账号背景共享可以在设置中关闭或调整轮数；普通编辑和本地 PDF 编译无需接入 AI。
 
 ## Visual 可视化编辑
 
@@ -42,6 +53,7 @@
 ### 图表卡片与草稿 PDF
 
 - 图片和表格以卡片呈现，图注和表注会按正文、强调与公式渲染。图片预览按需加载；简单表格可直接查看结构预览。
+- 点击“编译此卡片”后，卡片会直接显示裁去页面留白的 PDF 排版结果，不再嵌入浏览器 PDF 工具栏；多页结果可在卡片内翻页，也可打开或下载完整 PDF。
 - “纳入草稿 PDF”用于控制草稿编译中的图表。未选中的普通 `figure`、`table` 和独立 `\includegraphics` 会在临时副本中变成占位框，便于快速检查文字与结构。
 - 草稿结果会单独标记；**正式“编译 PDF”使用完整源码**。`longtable` 及无法安全保留标题或标签的结构始终完整编译，项目源码与正式 PDF 不会被草稿模式覆盖。
 
@@ -51,7 +63,7 @@
 
 | 地址 | 用途 |
 | --- | --- |
-| [在线产品介绍](https://stuboo3i.github.io/TeXloom/) | GitHub Pages 静态展示页；可浏览 Visual、多人协作、本地管理与 AI 辅助的介绍 |
+| [在线产品介绍](https://stuboo3i.github.io/TeXloom/) | GitHub Pages 静态展示页；可浏览 Visual、多人协作、本地管理与多服务商 AI 的介绍 |
 | `http://127.0.0.1:3001/` | TeXloom 产品首页，介绍本地编译、双向定位、协作和开源特点 |
 | `http://127.0.0.1:3001/?view=workspace` | 实际使用页面：项目分类、导入导出和 LaTeX 编辑器 |
 
@@ -68,10 +80,27 @@ flowchart LR
     E --> A
 ```
 
+## Agent CLI 侧栏
+
+点击侧栏终端图标打开 Agent CLI；侧栏宽度可拖动。每个项目对应一份本地对话记录，消息会标出服务商和账号。选择最多 20 个项目文件，再输入任务；切换服务商时，设置允许共享的近期对话会作为背景附给新的 Agent。不同服务商和账号各自保留原生线程，项目对话不需要从头重述。
+
+| CLI | 账号接入 | 模型与智能程度 |
+| --- | --- | --- |
+| Codex CLI | 系统已登录账号，或新增使用独立 `CODEX_HOME` 的账号 | 可设置模型和推理强度 |
+| Gemini CLI | 系统已登录账号，或新增使用独立 `GEMINI_CLI_HOME` 的账号 | 可设置模型；智能程度由 CLI 管理 |
+| Claude Code | 每个账号单独填写 Anthropic API Key，并使用独立配置目录 | 可设置模型和受支持的智能程度 |
+| 豆包 CLI | 当前使用系统默认登录账号；TeXloom 不自动安装 | 模型与智能程度由豆包 CLI 管理 |
+
+1. 在“设置 → Agent CLI”选择服务商与账号。Codex、Gemini 和豆包可打开系统终端登录；Claude Code 在此填写 API Key。可为支持的 CLI 设置模型、智能程度、超时和跨账号背景共享轮数。
+2. 回到 Agent CLI，选择文件和“分析建议”或“修改文件”。分析结果只展示在对话中；修改任务使用 `data/agent-workspaces/` 下的项目副本。若 CLI 无法直接编辑副本，也可返回精确片段替换建议。
+3. 查看待审阅文件的原文与修改后内容。点击“应用修改”前会再次核对项目源文件，避免覆盖这期间的更改；也可以放弃建议。
+
+CLI 会话与待审阅差异保存在 `data/agent-sessions/`，账号配置保存在 `data/agent-profiles.json`，均不随 Git 项目同步。Claude Code 的 API Key 由 Windows 当前用户的 DPAPI 加密。Agent CLI 与原有 AI API 写作助手相互独立；安装与使用外部 CLI 需遵循各服务商的要求。豆包 CLI 命令参见其[官方文档](https://www.doubao.com/work/docs/zh-cn/doubao-cli)。
+
 ## API Key 管理与多人协作安全
 
 - **项目留在本机。** 项目文件默认放在 `projects/`，也可选择源码仓库之外的自定义根目录；应用不会自动上传项目。默认项目目录及本机设置目录 `data/` 被仓库的 `.gitignore` 排除。只有你主动连接远程仓库并执行 Git 同步时，相应项目源码才会传到该远程仓库。
-- **密钥由本机管理。** DeepSeek API Key 由 Windows 当前用户的 DPAPI 加密后保存在 `data/ai-settings.json`。设置接口只返回是否已配置，不回传明文；可在设置中清除 Key、调整模型、输出上限和超时。调用 AI 时，后端才解密 Key，并将你提交的提示词、选中文本、额外上下文或图片发送至 DeepSeek。普通编辑和编译无需 Key。
+- **密钥由本机管理。** 可在设置中选择 DeepSeek、火山引擎 Ark、阿里云百炼、OpenAI GPT 或 Claude 原生 API。各服务商的 API Key 分别由 Windows 当前用户的 DPAPI 加密后保存在 `data/ai-settings.json`；切换服务商不会覆盖其他 Key。设置接口只返回是否已配置，不回传明文。调用 AI 时，后端才解密当前服务商的 Key，并将主动提交的提示词、选中文本、上下文或图片发送至该服务商。普通编辑和编译无需 Key。
 - **协作使用个人分支。** Git 远程地址只接受不含凭据的 GitHub HTTPS 或 SSH 地址；请使用 Git Credential Manager 或 SSH 登录，不要把令牌放进 URL。应用内拒绝直接推送 `main` / `master`，拉取仅允许快进，并在拉取前检查本地未提交改动。评论与修改建议可同步到独立的 `texloom-reviews` 分支；接受建议前会校验原文。
 
 ### 数据何时离开本机
@@ -85,7 +114,7 @@ flowchart LR
       P --> A
       K --> A
     end
-    A -->|"仅在使用 AI 时：所选内容及请求"| D["DeepSeek API"]
+    A -->|"仅在使用 AI 时：所选内容及请求"| D["所选 AI API 服务商或 Agent CLI"]
     P -->|"仅在主动执行 Git 同步时：项目源码"| G["GitHub 项目仓库"]
     A -->|"同步审阅记录时：评论事件"| R["GitHub texloom-reviews 分支"]
 ```
@@ -99,6 +128,7 @@ flowchart LR
 - Windows 10/11 和可用的桌面会话；本地文件夹选择功能需要桌面会话。
 - Node.js 20.19+ 或 22.12+（推荐 Node.js 24）及 npm；使用克隆命令还需要 Git。
 - 仓库中的 `runtime/tectonic.exe`。若该文件缺失，请从 [Tectonic 官方发布页](https://github.com/tectonic-typesetting/tectonic/releases) 下载 Windows 版并放到该路径。
+- 使用 Agent CLI 时，按需另行安装对应服务商的命令行工具并完成登录或密钥配置；TeXloom 不自动安装 CLI，基础编辑与本地编译不依赖它。
 
 首次编译时，Tectonic 可能联网下载 LaTeX 支持文件并缓存在本机。服务默认只监听 `127.0.0.1:3001`，供这台电脑上的浏览器访问。
 
@@ -189,7 +219,7 @@ npm run dev
 
 ### 引用、资源与检索
 
-- 引用面板读取项目中的 `\label{...}` 和 `.bib` 文献键。
+- 引用面板实时整理当前源码中的标签，并读取项目其他 `.tex`、`.bib` 文件；支持搜索、按图/表/公式/章节/文献分类和手动输入键。文献键同时来自 `thebibliography` 的 `\bibitem` 与 `.bib` 条目，列表展示标题、作者及来源。选择公式插入 `\eqref`（必要时补充 `amsmath`），选择文献插入 `\cite`，其他标签插入 `\ref`；可点击“更新列表”重新读取项目文件。
 - 图片可从本机上传、从当前或其他项目复制，也可从公开 HTTPS URL 导入 PNG、JPEG 或 PDF。插入链接和图片时，若主文件缺少 `hyperref` 或 `graphicx`，应用会补充宏包声明。
 - 文件树支持折叠目录；文档大纲按主文件的 `\input` / `\include` 顺序展示标题。
 - 全项目搜索支持大小写、全词和正则表达式，可定位或批量替换。搜索最多读取前 200 个文本文件（每个不超过 2 MB），最多显示 500 处结果。
@@ -241,15 +271,17 @@ npm run dev
 
 ## AI 助手
 
-1. 在左侧“设置”填写自己的 DeepSeek API Key，选择模型，并设置输出上限和超时。
+1. 在左侧“设置 → AI API”选择 DeepSeek、火山引擎 Ark、阿里云百炼、OpenAI GPT 或 Claude，填写对应 API Key 和模型 ID，并设置输出上限和超时。可分别保存多家服务商的配置。
 2. 在 AI 面板选择问答、翻译、润色、报错解释、源码改写、公式或表格生成，也可输入自定义指令。
 3. 先预览原文与生成结果，再决定是否应用到编辑器。表格插入面板还可用支持视觉输入的模型识别 PNG/JPEG 表格图片。
 
-**宏包建议：** AI 面板的“宏包建议”页可先用本地规则分析主文件、需求和最近编译日志，无需 API Key。配置 Key 后，可主动点击“DeepSeek 分析”，让 AI 结合需求、当前选中的源码、主文件导言区及可选日志推荐宏包。后端只接受内置目录中的宏包名称，标出已经加载的宏包，并提供 CTAN 资料。点击“预览并添加”查看要插入的 `\usepackage` 声明；确认时会核对主文件是否变化，防止覆盖新编辑。添加后请实际编译确认兼容性；建议不会自动下载或安装宏包。
+**宏包建议：** AI 面板的“宏包建议”页可先用本地规则分析主文件、需求和最近编译日志，无需 API Key。配置 Key 后，可主动点击“AI 分析”，让所选服务商结合需求、当前选中的源码、主文件导言区及可选日志推荐宏包。后端只接受内置目录中的宏包名称，标出已经加载的宏包，并提供 CTAN 资料。点击“预览并添加”查看要插入的 `\usepackage` 声明；确认时会核对主文件是否变化，防止覆盖新编辑。添加后请实际编译确认兼容性；建议不会自动下载或安装宏包。
 
-**密钥与数据：** Key 由本机后端使用 Windows 当前用户的 DPAPI 加密保存，不写入浏览器存储、项目文件或导出的 ZIP。AI 写作请求会把你选择的文本、输入的要求，以及明确使用的编译日志发送到 DeepSeek。宏包分析仅在点击“DeepSeek 分析”时发送需求、选中的源码（最多 3000 字符）、导言区（最多 12000 字符）及勾选的日志（最多 4000 字符）。
+**项目级 Agent：** 侧栏 Agent CLI 可在 Codex、Gemini、Claude Code 与豆包之间切换，携带所选文件和允许共享的项目对话继续讨论；账号、模型及共享轮数见 [Agent CLI 侧栏](#agent-cli-侧栏)。AI API 快捷工具与 Agent CLI 可分别配置，按写作任务选用。
 
-**费用：** 普通编辑、编译和项目管理无需 API Key。TeXloom 本身不设付费功能；DeepSeek API 由你的账户按其服务规则计费。
+**密钥与数据：** Key 由本机后端使用 Windows 当前用户的 DPAPI 加密保存，不写入浏览器存储、项目文件或导出的 ZIP。AI 写作请求会把你选择的文本、输入的要求，以及明确使用的编译日志发送到当前所选服务商。宏包分析仅在点击“AI 分析”时发送需求、选中的源码（最多 3000 字符）、导言区（最多 12000 字符）及勾选的日志（最多 4000 字符）。
+
+**费用：** 普通编辑、编译和项目管理无需 API Key。TeXloom 本身不设付费功能；各 AI API 与 Agent CLI 依照你所使用的账户和服务规则计费。
 
 **本地数据：** 项目默认存储在 `projects/`，自定义根目录记录在 `data/workspace.json`；删除项目会删除其实际所在目录中的相应文件。默认的 `projects/`、`data/`、`dist/` 和 `node_modules/` 不纳入版本控制。
 
@@ -287,7 +319,8 @@ npx tsx --test tests/editor-features.test.ts tests/synctex.test.ts tests/git-col
 | 测试 | 验证内容与条件 |
 | --- | --- |
 | `tests/api-smoke.mjs`、`tests/ai-settings-smoke.mjs` | 设置 `TEXLOOM_URL`；使用临时测试项目或测试密钥 |
-| `tests/ai-stream-smoke.ts` | 用本地模拟响应验证流式链路，不访问 DeepSeek |
+| `tests/ai-stream-smoke.ts` | 用本地模拟响应验证流式链路，不访问外部 AI 服务 |
+| `tests/agent-provider.test.ts`、`tests/agent-session.test.ts` | 验证 API 服务商、Agent CLI 会话迁移、跨账号背景共享、密钥隔离及豆包 Windows 命令适配 |
 | `tests/collaboration-smoke.mjs` | 用两个临时项目和本地临时裸仓库验证分支与审阅同步；测试服务需设置 `TEXLOOM_TEST_LOCAL_GIT=1` |
 | `tests/folder-projects-smoke.mjs` | 验证批量导入导出、分类元数据、防覆盖和敏感文件跳过；测试服务需设置 `TEXLOOM_TEST_FOLDER_PICKER=1` |
 | `tests/package-advice-smoke.mjs` | 在运行中的本地服务创建并删除临时项目，检查宏包建议、预览防覆盖和 Tectonic 实际编译；默认访问 `3002`，也可设置 `TEXLOOM_URL` |

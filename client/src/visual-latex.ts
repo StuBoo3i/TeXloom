@@ -9,7 +9,7 @@ export type InlineNode = SourceSpan & {
   name?: string
 }
 export type VisualBlock = SourceSpan & {
-  kind: 'paragraph' | 'heading' | 'list' | 'math' | 'source' | 'title' | 'abstract' | 'theorem' | 'highlight' | 'figure' | 'table'
+  kind: 'paragraph' | 'heading' | 'list' | 'math' | 'source' | 'title' | 'abstract' | 'theorem' | 'highlight' | 'figure' | 'table' | 'blank'
   raw: string
   level?: number
   title?: SourceSpan
@@ -290,6 +290,19 @@ function parseBlocks(source: string, bodyStart: number, bodyEnd: number, title?:
   while (i < bodyEnd) {
     if (/\s/.test(source[i]) && (i === bodyStart || source.slice(i).match(/^\s+/)?.[0].includes('\n'))) {
       const space = source.slice(i, bodyEnd).match(/^\s+/)?.[0] ?? ''
+      const limit = i + space.length
+      let cursor = i
+      let atLineStart = i === 0 || source[i - 1] === '\n'
+      while (cursor < limit) {
+        const newline = source.indexOf('\n', cursor)
+        if (newline < 0 || newline >= limit) break
+        if (atLineStart) {
+          const contentEnd = source[newline - 1] === '\r' ? newline - 1 : newline
+          blocks.push({ kind: 'blank', start: cursor, end: newline + 1, raw: source.slice(cursor, newline + 1), content: { start: cursor, end: contentEnd } })
+        }
+        cursor = newline + 1
+        atLineStart = true
+      }
       i += space.length
       continue
     }

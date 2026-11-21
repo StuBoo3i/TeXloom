@@ -13,3 +13,16 @@
 .visual-media-caption{padding:12px 14px 10px;border-bottom:1px solid var(--theme-accent-border,#d9e5ec);color:var(--theme-text,#263c50);font:calc(14px * var(--ui-font-scale,1))/1.75 Georgia,'Noto Serif CJK SC','SimSun',serif;white-space:normal;overflow-wrap:anywhere}.visual-media-caption.empty{font:11px var(--ui-font-family,system-ui);opacity:.65}.visual-media-caption .visual-math{vertical-align:middle}.visual-caption-fallback{font:inherit}:root[data-theme=night] .visual-media-caption{color:#e0ebf4}:root[data-theme=eye] .visual-media-caption{color:#284a38}
 .visual-media-caption{white-space:pre-line}
 .visual-table-hint{display:block;margin:0 0 8px;color:var(--theme-accent-strong,#587892);font:10px var(--ui-font-family,system-ui)}.visual-media-preview table{width:100%;font-family:Georgia,'Noto Serif CJK SC','SimSun',serif;line-height:1.6}.visual-media-preview td{vertical-align:top;overflow-wrap:anywhere}.visual-media-preview td:first-child{white-space:nowrap}.visual-media-preview .visual-math{vertical-align:middle}
+.visual-page{min-height:100%;margin:8px auto 16px;padding-top:24px}
+.visual-blank-line{min-height:1.8em}.visual-blank-editable{display:block;width:100%;min-height:1.8em;padding:0 .35em}.visual-blank-editable:empty:before{content:'在此输入';color:var(--theme-accent-strong,#6a8aa0);opacity:0;pointer-events:none}.visual-blank-line:hover .visual-blank-editable:empty:before,.visual-blank-editable:focus:empty:before{opacity:.45}
+.visual-page>.visual-blank-line,.visual-structured-body>.visual-blank-line{content-visibility:visible;contain-intrinsic-size:auto}
+.editor-preview.layout-editor .visual-page{width:min(calc(100% - 36px),1280px);padding-inline:clamp(28px,4.5vw,76px)}
+.visual-math:not(.display){display:inline-block;max-width:100%;vertical-align:-.22em;white-space:nowrap}
+.visual-math-render{user-select:all;-webkit-user-select:all}
+.visual-math-render:not(.display){display:inline-block;max-inline-size:calc(100% - 24px);overflow-x:auto;overflow-y:hidden;padding:.24em .4em .24em 0;vertical-align:middle;scrollbar-width:none}
+.visual-math-render:not(.display)::-webkit-scrollbar{display:none}
+.visual-math:not(.display)>button{display:inline-flex;vertical-align:middle;width:18px;height:18px;margin-left:3px}
+.visual-math.display .visual-math-render{min-width:0;overflow-x:auto;overflow-y:hidden;padding:.4em 0}
+.visual-math:not(.display) .visual-math-input{display:inline-block;width:min(70ch,100%);vertical-align:middle}
+.visual-math:not(.display) .visual-math-input textarea{min-width:0;min-height:2.6em;max-height:15em}
+@media(max-width:700px){.editor-preview.layout-editor .visual-page{width:calc(100% - 12px);padding-inline:18px}}

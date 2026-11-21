@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { BookOpen, Bold, Bot, Braces, Check, ChevronDown, ChevronRight, CircleHelp, Code2, Columns2, Download, File, FileClock, FilePlus2, FileText, Folder, GitBranch, Heading, Highlighter, ImagePlus, Italic, Link2, List, ListOrdered, LocateFixed, MessageSquare, MoreHorizontal, Omega, Paperclip, Plus, Redo2, Search, Settings2, Sigma, Sparkles, Table2, Tag, Undo2, Upload, X } from 'lucide-react'
+import { BookOpen, Bold, Bot, Braces, Check, ChevronDown, ChevronRight, CircleHelp, Code2, Columns2, Download, File, FileClock, FilePlus2, FileText, Folder, GitBranch, Heading, Highlighter, ImagePlus, Italic, Link2, List, ListOrdered, LocateFixed, MessageSquare, MoreHorizontal, Omega, Paperclip, Plus, Redo2, Search, Settings2, Sigma, Sparkles, Table2, Tag, TerminalSquare, Undo2, Upload, X } from 'lucide-react'
 import './workspace-ui.css'
 import './workspace-features.css'
 import './review-panel.css'
@@ -10,17 +10,20 @@ import { AppearanceSettings } from './appearance-settings'
 import { GitRemotePanel } from './git-remote-panel'
 import { GitCollaborationPanel } from './git-collaboration-panel'
 import { PackageAdvicePanel } from './package-advice-panel'
+import { AiServiceSettings, type AiSettingsInput, type AiSettingsView } from './ai-service-settings'
+import { AgentConsole, type AgentSourceSelection } from './agent-console'
+import { AgentProfileSettings } from './agent-profile-settings'
 import type { Appearance } from './appearance'
 import { highlightColors } from './highlight'
 
-export type PanelId = 'files' | 'search' | 'review' | 'history' | 'integrations' | 'ai' | 'settings'
+export type PanelId = 'files' | 'search' | 'review' | 'history' | 'integrations' | 'ai' | 'agent' | 'settings'
 export type WorkspaceFile = { path: string; type: 'file' | 'directory'; size?: number }
 export type WorkspaceProject = { id: string; name: string; mainFile: string }
 export type ReviewThread = { id: string; file: string; line: number; column: number; original: string; body: string; author?: string; proposed?: string; type: 'comment' | 'suggestion'; status: 'open' | 'resolved' | 'accepted' | 'rejected'; createdAt: string; replies: { id: string; body: string; author?: string; createdAt: string }[]; target?: { branch: string; commit: string; blob: string }; locationStale?: boolean }
 export type Snapshot = { id: string; note: string; createdAt: string; fileCount: number }
 export type GitState = { initialized: boolean; branch: string; remote: string; status: string; commits: { id: string; shortId: string; date: string; message: string }[]; authorName?: string; authorEmail?: string }
 export type GitFeedback = { action: 'push' | 'pull'; status: 'running' | 'success' | 'error'; message: string } | null
-export type AiSettingsView = { configured: boolean; model: string; maxOutputTokens: number; timeoutSeconds: number }
+export type { AiSettingsView } from './ai-service-settings'
 export type AiOutputView = { mode: string; text: string; selectedText: string; path: string } | null
 type Command = (id: string) => void
 
@@ -117,6 +120,7 @@ const panelTabs: { id: PanelId; label: string; icon: React.ReactNode }[] = [
   { id: 'history', label: '历史记录', icon: <FileClock size={19} /> },
   { id: 'integrations', label: 'Git 集成', icon: <GitBranch size={19} /> },
   { id: 'ai', label: 'AI 助手', icon: <Sparkles size={19} /> },
+  { id: 'agent', label: 'Agent CLI', icon: <TerminalSquare size={19} /> },
   { id: 'settings', label: '设置', icon: <Settings2 size={19} /> },
 ]
 
@@ -131,8 +135,8 @@ function savedGitAuthor(): { name: string; email: string } {
   } catch { return { name: '', email: '' } }
 }
 
-export function WorkspaceSidebar({ project, files, activePath, activePanel, outline, activeOutlineLine, searchHits, searchBusy, searchError, reviewThreads, snapshots, gitState, gitFeedback, aiSettings, aiOutput, aiBusy, aiError, editorFontSize, editorWrap, autoCompile, appearance, highlightColor, onHighlightColor, onPanelChange, onCommand, onOpenFile, onDeleteFile, onNavigate, onSearch, onReplaceAll, onAddReview, onReviewAction, onCreateSnapshot, onRestoreSnapshot, onGitAction, onGitBranchChange, onReviewReload, onAiRequest, onAiApply, onAiCancel, onSaveAiSettings, onEditorPreferences, onAutoCompile, onAppearanceChange, onPackageEnsureSaved, onPackageSelectedText, onPackageApplied }: {
-  project: WorkspaceProject; files: WorkspaceFile[]; activePath: string; activePanel: PanelId | null;
+export function WorkspaceSidebar({ project, files, activePath, activePanel, onAgentGetSelection, onAgentBeforeRun, onAgentApplied, outline, activeOutlineLine, searchHits, searchBusy, searchError, reviewThreads, snapshots, gitState, gitFeedback, aiSettings, aiOutput, aiBusy, aiError, editorFontSize, editorWrap, autoCompile, appearance, highlightColor, onHighlightColor, onPanelChange, onCommand, onOpenFile, onDeleteFile, onNavigate, onSearch, onReplaceAll, onAddReview, onReviewAction, onCreateSnapshot, onRestoreSnapshot, onGitAction, onGitBranchChange, onReviewReload, onAiRequest, onAiApply, onAiCancel, onSaveAiSettings, onEditorPreferences, onAutoCompile, onAppearanceChange, onPackageEnsureSaved, onPackageSelectedText, onPackageApplied }: {
+  project: WorkspaceProject; files: WorkspaceFile[]; activePath: string; activePanel: PanelId | null; onAgentGetSelection: () => AgentSourceSelection | null; onAgentBeforeRun: () => Promise<boolean>; onAgentApplied: (paths: string[]) => void;
   outline: OutlineEntry[]; activeOutlineLine: number; searchHits: SearchHit[]; searchBusy: boolean; searchError: string;
   reviewThreads: ReviewThread[]; snapshots: Snapshot[]; gitState: GitState | null; gitFeedback: GitFeedback;
   aiSettings: AiSettingsView; aiOutput: AiOutputView; aiBusy: boolean; aiError: string;
@@ -145,7 +149,7 @@ export function WorkspaceSidebar({ project, files, activePath, activePanel, outl
   onGitAction: (action: 'init' | 'commit' | 'remote' | 'push' | 'pull', payload?: { message?: string; name?: string; email?: string; url?: string }) => Promise<boolean>;
   onGitBranchChange: (name: string, create: boolean, from?: string) => Promise<boolean>; onReviewReload: () => Promise<void>;
   onAiRequest: (mode: string, prompt: string) => void; onAiApply: () => void; onAiCancel: () => void;
-  onSaveAiSettings: (settings: { apiKey?: string; clearKey?: boolean; model: string; maxOutputTokens: number; timeoutSeconds: number }) => void;
+  onSaveAiSettings: (settings: AiSettingsInput) => void;
   onEditorPreferences: (fontSize: number, wrap: 'on' | 'off') => void; onAutoCompile: (value: boolean) => void; onAppearanceChange: (value: Appearance) => void;
   onPackageEnsureSaved: () => Promise<boolean>; onPackageSelectedText: () => string; onPackageApplied: (file: string, content: string) => void;
 }) {
@@ -156,10 +160,7 @@ export function WorkspaceSidebar({ project, files, activePath, activePanel, outl
   const [reviewScope, setReviewScope] = useState<'file' | 'project'>('file')
   const [aiPrompt, setAiPrompt] = useState('')
   const [aiSection, setAiSection] = useState<'writing' | 'packages'>('writing')
-  const [apiKey, setApiKey] = useState('')
-  const [model, setModel] = useState('deepseek-flash')
-  const [maxOutputTokens, setMaxOutputTokens] = useState(2048)
-  const [timeoutSeconds, setTimeoutSeconds] = useState(90)
+  const [settingsSection, setSettingsSection] = useState<'appearance' | 'editing' | 'ai' | 'agent' | 'privacy'>('appearance')
   const [outlineOpen, setOutlineOpen] = useState(true)
   const [collapsedDirs, setCollapsedDirs] = useState<Set<string>>(new Set())
   const [replacement, setReplacement] = useState('')
@@ -168,7 +169,6 @@ export function WorkspaceSidebar({ project, files, activePath, activePanel, outl
   const [commitMessage, setCommitMessage] = useState('')
   const [gitName, setGitName] = useState(() => savedGitAuthor().name)
   const [gitEmail, setGitEmail] = useState(() => savedGitAuthor().email)
-  useEffect(() => { setModel(aiSettings.model); setMaxOutputTokens(aiSettings.maxOutputTokens); setTimeoutSeconds(aiSettings.timeoutSeconds) }, [aiSettings])
   useEffect(() => {
     const saved = savedGitAuthor()
     setGitName(saved.name || gitState?.authorName || '')
@@ -195,10 +195,12 @@ export function WorkspaceSidebar({ project, files, activePath, activePanel, outl
   const currentOutlineLine = outline.filter(entry => entry.file === activePath && entry.line <= activeOutlineLine).at(-1)?.line
   return <div className="workspace-sidebar">
     <nav className="side-rail" aria-label="侧栏功能">
-      {panelTabs.map(tab => <button key={tab.id} title={tab.label} aria-label={tab.label} aria-pressed={activePanel === tab.id} className={activePanel === tab.id ? 'selected' : ''} onClick={() => onPanelChange(activePanel === tab.id ? null : tab.id)}>{tab.icon}</button>)}
+      {panelTabs.filter(tab => tab.id !== 'settings').map(tab => <button key={tab.id} title={tab.label} aria-label={tab.label} aria-pressed={activePanel === tab.id} className={activePanel === tab.id ? 'selected' : ''} onClick={() => onPanelChange(activePanel === tab.id ? null : tab.id)}>{tab.icon}</button>)}
+      <button title="设置" aria-label="设置" aria-pressed={activePanel === 'settings'} className={activePanel === 'settings' ? 'selected' : ''} onClick={() => onPanelChange(activePanel === 'settings' ? null : 'settings')}><Settings2 size={19} /></button>
     </nav>
     {activePanel && <aside className="side-panel" aria-label={label}>
-      <div className="side-panel-header"><strong>{label}</strong><button className="side-icon" title="收起侧栏" aria-label="收起侧栏" onClick={() => onPanelChange(null)}><X size={17} /></button></div>
+      {activePanel !== 'agent' && <div className="side-panel-header"><strong>{label}</strong><button className="side-icon" title="收起侧栏" aria-label="收起侧栏" onClick={() => onPanelChange(null)}><X size={17} /></button></div>}
+      {activePanel === 'agent' && <AgentConsole projectId={project.id} files={files} activePath={activePath} onGetSelection={onAgentGetSelection} onBeforeRun={onAgentBeforeRun} onApplied={onAgentApplied} onSettings={() => { setSettingsSection('agent'); onPanelChange('settings') }} onClose={() => onPanelChange(null)} />}
       {activePanel === 'files' && <div className="files-panel">
         <div className="panel-project"><span className="project-avatar">{project.name.slice(0, 1)}</span><div><strong title={project.name}>{project.name}</strong><small>主文件：{project.mainFile}</small></div></div>
         <div className="panel-section-head"><strong>文件树</strong><div><button className="side-icon" title="新建文件" aria-label="新建文件" onClick={() => onCommand('newFile')}><FilePlus2 size={16} /></button><button className="side-icon" title="上传文件" aria-label="上传文件" onClick={() => onCommand('upload')}><Upload size={16} /></button></div></div>
@@ -214,7 +216,14 @@ export function WorkspaceSidebar({ project, files, activePath, activePanel, outl
       {activePanel === 'history' && <div className="side-panel-content"><div className="history-create"><input value={snapshotNote} onChange={event => setSnapshotNote(event.target.value)} placeholder="快照说明（可选）" /><button onClick={() => { onCreateSnapshot(snapshotNote); setSnapshotNote('') }}><Plus size={14} />创建快照</button></div>{snapshots.length ? <div className="history-list">{snapshots.map(item => <div className="history-card" key={item.id}><strong>{item.note}</strong><small>{new Date(item.createdAt).toLocaleString('zh-CN')} · {item.fileCount} 个文件</small><button onClick={() => onRestoreSnapshot(item.id)}>恢复此版本</button></div>)}</div> : <EmptyState icon={<FileClock size={24} />} title="暂无历史记录" description="创建快照以保存当前项目版本。" />}</div>}
       {activePanel === 'integrations' && <div className="side-panel-content"><div className="panel-card"><GitBranch size={22} /><strong>本地 Git</strong>{!gitState?.initialized ? <><p>将当前项目初始化为 Git 仓库。</p><button onClick={() => onGitAction('init')}>初始化仓库</button></> : <><p>分支：{gitState.branch || '未创建提交'}<br />{gitState.status ? `未提交改动：${gitState.status.split(/\r?\n/).length} 项` : '工作区干净'}</p><div className="git-form"><input value={commitMessage} onChange={event => setCommitMessage(event.target.value)} placeholder="提交说明" /><input value={gitName} onChange={event => setGitName(event.target.value)} placeholder="提交者姓名" /><input value={gitEmail} onChange={event => setGitEmail(event.target.value)} placeholder="提交者邮箱" /><button disabled={!commitMessage.trim() || !gitName.trim() || !gitEmail.trim()} onClick={() => void commitChanges()}>提交改动</button></div></>}</div>{gitState?.initialized && <><GitRemotePanel projectId={project.id} state={gitState} feedback={gitFeedback} onAction={onGitAction} /><GitCollaborationPanel projectId={project.id} state={gitState} onSwitch={onGitBranchChange} onReload={onReviewReload} /><div className="git-commits"><strong>最近提交</strong>{gitState.commits.length ? gitState.commits.map(commit => <div key={commit.id}><span>{commit.message}</span><small>{commit.shortId} · {new Date(commit.date).toLocaleString('zh-CN')}</small></div>) : <p>暂无提交</p>}</div></>}</div>}
       {activePanel === 'ai' && <div className="side-panel-content ai-panel"><div className="ai-section-tabs" role="tablist" aria-label="AI 工具"><button role="tab" aria-selected={aiSection === 'writing'} className={aiSection === 'writing' ? 'active' : ''} onClick={() => setAiSection('writing')}>写作助手</button><button role="tab" aria-selected={aiSection === 'packages'} className={aiSection === 'packages' ? 'active' : ''} onClick={() => setAiSection('packages')}>宏包建议</button></div>{aiSection === 'writing' ? <><div className="ai-quick-actions"><button onClick={() => onAiRequest('translate', aiPrompt)}>翻译选区</button><button onClick={() => onAiRequest('polish', aiPrompt)}>润色选区</button><button onClick={() => onAiRequest('explain', aiPrompt)}>解释报错</button><button onClick={() => onAiRequest('rewrite', aiPrompt)}>改写选区</button><button onClick={() => onAiRequest('formula', aiPrompt)}>生成公式</button><button onClick={() => onAiRequest('table', aiPrompt)}>生成表格</button><button onClick={() => onAiRequest('custom', aiPrompt)}>自定义指令</button></div>{aiOutput ? <div className="ai-result"><strong>AI 结果 · {aiOutput.mode}</strong>{aiOutput.selectedText && <><small>原文</small><pre>{aiOutput.selectedText}</pre></>}<small>生成内容</small><pre>{aiOutput.text || (aiBusy ? '正在生成…' : '暂无内容')}</pre>{aiError && <p role="alert">{aiError}</p>}<div>{aiBusy ? <button onClick={onAiCancel}>停止生成</button> : <>{!['chat', 'explain'].includes(aiOutput.mode) && <button disabled={!aiOutput.text || aiOutput.path !== activePath} onClick={onAiApply}>预览并应用</button>}</>}</div></div> : <EmptyState icon={<Bot size={25} />} title="AI 写作助手" description="可对选中的 LaTeX 提问，并在应用前预览修改。" />}{aiError && !aiOutput && <p className="ai-error" role="alert">{aiError}</p>}<form className="ai-input" onSubmit={event => { event.preventDefault(); if (aiPrompt.trim()) onAiRequest('chat', aiPrompt) }}><textarea value={aiPrompt} onChange={event => setAiPrompt(event.target.value)} placeholder="向 AI 提问，或写下改写要求…" rows={3} /><div><button type="button" onClick={() => onPanelChange('settings')}>{aiSettings.configured ? 'API 已配置' : '配置 API'}</button><button type="submit" disabled={!aiPrompt.trim() || aiBusy}>发送</button></div></form></> : <PackageAdvicePanel projectId={project.id} aiConfigured={aiSettings.configured} ensureSaved={onPackageEnsureSaved} getSelectedText={onPackageSelectedText} onApplied={onPackageApplied} openSettings={() => onPanelChange('settings')} />}</div>}
-      {activePanel === 'settings' && <div className="side-panel-content settings-panel"><strong>AI 服务</strong><p>{aiSettings.configured ? '已配置 DeepSeek API Key' : '尚未配置 API Key'}</p><label>DeepSeek API Key<input type="password" autoComplete="new-password" value={apiKey} onChange={event => setApiKey(event.target.value)} placeholder={aiSettings.configured ? '留空则保持当前密钥' : '输入 API Key'} /></label><label>模型<input value={model} onChange={event => setModel(event.target.value)} /></label><label>单次最大输出 Token<input type="number" min="256" max="8192" value={maxOutputTokens} onChange={event => setMaxOutputTokens(Number(event.target.value))} /></label><label>请求超时（秒）<input type="number" min="10" max="180" value={timeoutSeconds} onChange={event => setTimeoutSeconds(Number(event.target.value))} /></label><p>密钥由本机 Windows 用户加密存储。调用 AI 时，选中的文本和填写的要求会发给 DeepSeek。</p><button className="panel-action" onClick={() => { onSaveAiSettings({ apiKey, model, maxOutputTokens, timeoutSeconds }); setApiKey('') }}>保存 AI 设置</button>{aiSettings.configured && <button className="panel-action" onClick={() => onSaveAiSettings({ clearKey: true, model, maxOutputTokens, timeoutSeconds })}>移除 API Key</button>}<AppearanceSettings value={appearance} onChange={onAppearanceChange} /><label>高亮颜色<select value={highlightColor} onChange={event => onHighlightColor(event.target.value)}>{highlightColors.map(color => <option key={color.latex} value={color.latex}>{color.label} · {color.latex}</option>)}</select></label><strong>编辑器与编译</strong><label>编辑器字号<select value={editorFontSize} onChange={event => onEditorPreferences(Number(event.target.value), editorWrap)}>{[11,12,13,14,15,16,18,20,22,24].map(size => <option key={size} value={size}>{size} px</option>)}</select></label><label className="settings-checkbox"><input type="checkbox" checked={editorWrap === 'on'} onChange={event => onEditorPreferences(editorFontSize, event.target.checked ? 'on' : 'off')} />自动换行</label><label className="settings-checkbox"><input type="checkbox" checked={autoCompile} onChange={event => onAutoCompile(event.target.checked)} />自动编译</label><p>大型项目可关闭自动编译，按“编译 PDF”手动生成预览。</p></div>}
+      {activePanel === 'settings' && <div className="side-panel-content settings-panel">
+        <nav className="settings-sections" aria-label="设置分类">{([['appearance', '外观'], ['editing', '编辑与编译'], ['ai', 'AI API'], ['agent', 'Agent CLI'], ['privacy', '数据与隐私']] as const).map(([id, label]) => <button key={id} className={settingsSection === id ? 'active' : ''} onClick={() => setSettingsSection(id)}>{label}</button>)}</nav>
+        {settingsSection === 'appearance' && <><AppearanceSettings value={appearance} onChange={onAppearanceChange} /><label>高亮颜色<select value={highlightColor} onChange={event => onHighlightColor(event.target.value)}>{highlightColors.map(color => <option key={color.latex} value={color.latex}>{color.label} · {color.latex}</option>)}</select></label></>}
+        {settingsSection === 'editing' && <><strong>编辑器与编译</strong><label>编辑器字号<select value={editorFontSize} onChange={event => onEditorPreferences(Number(event.target.value), editorWrap)}>{[11,12,13,14,15,16,18,20,22,24].map(size => <option key={size} value={size}>{size} px</option>)}</select></label><label className="settings-checkbox"><input type="checkbox" checked={editorWrap === 'on'} onChange={event => onEditorPreferences(editorFontSize, event.target.checked ? 'on' : 'off')} />自动换行</label><label className="settings-checkbox"><input type="checkbox" checked={autoCompile} onChange={event => onAutoCompile(event.target.checked)} />自动编译</label><p>大型项目可关闭自动编译，按“编译 PDF”手动生成预览。</p></>}
+        {settingsSection === 'ai' && <AiServiceSettings value={aiSettings} onSave={onSaveAiSettings} />}
+        {settingsSection === 'agent' && <AgentProfileSettings projectId={project.id} />}
+        {settingsSection === 'privacy' && <div className="settings-privacy"><strong>本机数据</strong><p>项目对话保存在本地 data/agent-sessions。不同 Agent 的对话默认可以共享最近记录；你可以在 Agent CLI 设置中逐账号关闭共享。</p><p>Claude Code 的密钥仅保存在本机加密配置中。Agent 的文件修改先进入工作副本，确认差异后才应用到项目。</p></div>}
+      </div>}
     </aside>}
   </div>
 }

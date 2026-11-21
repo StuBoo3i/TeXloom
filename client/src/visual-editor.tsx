@@ -2,28 +2,58 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import katex from 'katex'
 import { Code2, Pencil, Play, Image as ImageIcon, Table2 } from 'lucide-react'
 import { highlightCss } from './highlight'
+import { CardPdfPreview } from './card-pdf-preview'
 import { decodeText, draftCardKey, encodeText, parseVisualLatex, sourceOffsetForVisible, visibleOffsetForSource, type InlineNode, type SourceSpan, type VisualBlock } from './visual-latex'
 import 'katex/dist/katex.min.css'
 import './visual-editor.css'
 
 type Edit = (span: SourceSpan, expected: string, replacement: string) => void
 
-function Editable({ span, raw, prose = false, className = '', onEdit, onFocus, onBlur }: { span: SourceSpan; raw: string; prose?: boolean; className?: string; onEdit: Edit; onFocus?: () => void; onBlur?: () => void }) {
+function Editable({ span, raw, prose = false, commitOnBlur = false, className = '', onEdit, onFocus, onBlur, onDeleteEmpty }: { span: SourceSpan; raw: string; prose?: boolean; commitOnBlur?: boolean; className?: string; onEdit: Edit; onFocus?: () => void; onBlur?: () => void; onDeleteEmpty?: () => void }) {
   const element = useRef<HTMLSpanElement>(null)
+  const [editing, setEditing] = useState(false)
   const current = useRef({ span, raw })
+  const dirty = useRef(false)
   const visible = prose ? decodeText(raw) : raw
   useLayoutEffect(() => {
     current.current = { span, raw }
     if (element.current && document.activeElement !== element.current && element.current.textContent !== visible) element.current.textContent = visible
   }, [span.start, span.end, raw, visible])
-  return <span ref={element} className={`visual-editable ${className}`} data-source-start={span.start} data-source-end={span.end} contentEditable suppressContentEditableWarning spellCheck={false} role="textbox" aria-label="编辑文本" onFocus={onFocus} onBlur={onBlur} onInput={event => {
-    const value = event.currentTarget.innerText.replace(/\r/g, '')
+  const commit = (editable: HTMLElement) => {
+    const value = editable.innerText.replace(/\r/g, '')
     const encoded = prose ? encodeText(value) : value
     const { span: position, raw: expected } = current.current
     const next = expected.includes('\r\n') ? encoded.replace(/(?<!\r)\n/g, '\r\n') : encoded
     if (next === expected) return
     onEdit(position, expected, next)
     current.current = { span: { start: position.start, end: position.start + next.length }, raw: next }
+  }
+  return <span ref={element} className={`visual-editable ${className}`} data-source-start={span.start} data-source-end={span.end} contentEditable={editing} suppressContentEditableWarning spellCheck={false} role="textbox" aria-label={onDeleteEmpty ? '编辑空行，按退格或删除键移除空行' : '编辑文本'} onClick={event => {
+    // A normal drag must cross text and rendered formulae. Enter editing only after a click.
+    if (!window.getSelection()?.isCollapsed) return
+    const caret = document.caretRangeFromPoint?.(event.clientX, event.clientY)
+    const point = caret && event.currentTarget.contains(caret.startContainer) ? { node: caret.startContainer, offset: caret.startOffset } : null
+    setEditing(true)
+    requestAnimationFrame(() => {
+      const host = element.current
+      if (!host) return
+      host.focus()
+      const selection = window.getSelection()
+      if (point && selection && host.contains(point.node)) {
+        const range = document.createRange()
+        range.setStart(point.node, point.offset)
+        range.collapse(true)
+        selection.removeAllRanges()
+        selection.addRange(range)
+      }
+    })
+  }} onFocus={() => { dirty.current = false; onFocus?.() }} onBlur={event => { if (commitOnBlur && dirty.current) commit(event.currentTarget); dirty.current = false; setEditing(false); onBlur?.() }} onInput={event => { if (commitOnBlur) dirty.current = true; else commit(event.currentTarget) }} onKeyDown={event => {
+    if (!onDeleteEmpty || (event.key !== 'Backspace' && event.key !== 'Delete') || event.currentTarget.textContent?.trim()) return
+    const selection = window.getSelection()
+    if (selection && !selection.isCollapsed) return
+    event.preventDefault()
+    dirty.current = false
+    onDeleteEmpty()
   }} />
 }
 
@@ -37,7 +67,7 @@ function MathPreview({ value, display }: { value: string; display: boolean }) {
   return <span ref={element} className={display ? 'visual-math-render display' : 'visual-math-render'} />
 }
 
-function MathEditor({ span, value, previewValue, display, onEdit }: { span: SourceSpan; value: string; previewValue?: string; display: boolean; onEdit: Edit }) {
+function MathEditor({ span, selectionSpan, value, previewValue, display, onEdit }: { span: SourceSpan; selectionSpan: SourceSpan; value: string; previewValue?: string; display: boolean; onEdit: Edit }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(value)
   const original = useRef(value)
@@ -48,7 +78,7 @@ function MathEditor({ span, value, previewValue, display, onEdit }: { span: Sour
     original.current = draft
     setEditing(false)
   }
-  return <span className={`visual-math ${display ? 'display' : ''}`}>
+  return <span className={`visual-math ${display ? 'display' : ''}`} data-source-start={selectionSpan.start} data-source-end={selectionSpan.end} data-source-atomic="true">
     {editing ? <span className="visual-math-input"><textarea autoFocus aria-label="编辑公式源码" rows={display ? 3 : 1} value={draft} onChange={event => setDraft(event.target.value)} onBlur={save} onKeyDown={event => { if (event.key === 'Escape') { cancelled.current = true; setDraft(original.current); setEditing(false) } if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') event.currentTarget.blur() }} /></span> : <><MathPreview value={previewValue ?? value} display={display} /><button type="button" aria-label="编辑公式" title="编辑公式源码" onClick={() => { cancelled.current = false; original.current = value; setDraft(value); setEditing(true) }}><Pencil size={13} /></button></>}
   </span>
 }
@@ -84,7 +114,7 @@ function MediaCard({ block, projectId, source, assetPath, draftIncluded, onToggl
     <div className="visual-media-head">{block.kind === 'figure' ? <ImageIcon size={17} /> : <Table2 size={17} />}<strong>{title}</strong><span>{block.assets?.[0] ?? `${block.rows?.length ?? 0} 行`}</span></div>
     {block.captionChildren?.length ? <div className="visual-media-caption" aria-label={block.kind === 'figure' ? '完整图注' : '完整表注'}>{block.captionChildren.map((node, index) => <Inline key={index} node={node} source={source} onEdit={onEdit} onFocus={onFocus} onBlur={onBlur} caption />)}</div> : <div className="visual-media-caption empty">{block.kind === 'figure' ? '暂无图注' : '暂无表注'}</div>}
     <div className="visual-media-actions"><button type="button" onClick={preview}>{previewOpen ? '收起预览' : '查看预览'}</button><button type="button" onClick={() => setSourceOpen(value => !value)}><Code2 size={13} />{sourceOpen ? '收起源码' : '查看源码'}</button><button type="button" onClick={() => onReview(block)}>评论</button>{draftSupported ? <label className="visual-draft-toggle"><input type="checkbox" checked={draftIncluded} onChange={() => onToggleDraft(block)} />纳入草稿 PDF</label> : <span className="visual-draft-toggle">此结构始终完整编译</span>}<button type="button" disabled={busy} onClick={() => void compile()}><Play size={12} />{busy ? '编译中…' : '编译此卡片'}</button></div>
-    {previewOpen && <div className="visual-media-preview">{pdfUrl ? <iframe title="卡片编译预览" src={pdfUrl} loading="lazy" /> : block.kind === 'figure' && block.assets?.length ? block.assets.map(name => { const resolved = assetPath(name); return /\.(png|jpe?g)$/i.test(resolved) ? <img key={name} loading="lazy" alt={title} src={`/api/projects/${encodeURIComponent(projectId)}/asset?path=${encodeURIComponent(resolved)}`} /> : <div key={name} className="visual-media-placeholder">{name} · 点击编译查看排版</div> }) : block.tableCells?.length ? <><small className="visual-table-hint">结构预览 · 精确排版以 PDF 为准</small><table><tbody>{block.tableCells.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell.children.map((node, nodeIndex) => <Inline key={nodeIndex} node={node} source={source} onEdit={onEdit} onFocus={onFocus} onBlur={onBlur} caption />)}</td>)}</tr>)}</tbody></table></> : <div className="visual-media-placeholder">复杂图表需编译后查看排版</div>}</div>}
+    {previewOpen && <div className={`visual-media-preview ${pdfUrl ? 'compiled' : ''}`}>{pdfUrl ? <CardPdfPreview url={pdfUrl} /> : block.kind === 'figure' && block.assets?.length ? block.assets.map(name => { const resolved = assetPath(name); return /\.(png|jpe?g)$/i.test(resolved) ? <img key={name} loading="lazy" alt={title} src={`/api/projects/${encodeURIComponent(projectId)}/asset?path=${encodeURIComponent(resolved)}`} /> : <div key={name} className="visual-media-placeholder">{name} · 点击编译查看排版</div> }) : block.tableCells?.length ? <><small className="visual-table-hint">结构预览 · 精确排版以 PDF 为准</small><table><tbody>{block.tableCells.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell.children.map((node, nodeIndex) => <Inline key={nodeIndex} node={node} source={source} onEdit={onEdit} onFocus={onFocus} onBlur={onBlur} caption />)}</td>)}</tr>)}</tbody></table></> : <div className="visual-media-placeholder">复杂图表需编译后查看排版</div>}</div>}
     {!previewOpen && <div className="visual-media-placeholder">预览尚未加载 · 按需打开以减少长文档资源占用</div>}
     {error && <p role="alert" className="visual-media-error">{error}</p>}
     {sourceOpen && <SourceEditor block={block} onEdit={onEdit} onClose={() => setSourceOpen(false)} />}
@@ -107,7 +137,7 @@ function Inline({ node, source, onEdit, onFocus, onBlur, caption = false }: { no
     return node.kind === 'bold' ? <strong className="visual-format">{children}</strong> : <em className="visual-format">{children}</em>
   }
   if (node.kind === 'highlight') return <mark className="visual-inline-highlight" style={{ backgroundColor: highlightCss(node.name) }}>{node.children?.map((child, index) => <Inline key={index} node={child} source={source} onEdit={onEdit} onFocus={onFocus} onBlur={onBlur} caption={caption} />)}</mark>
-  if (node.kind === 'math' && node.value) return <MathEditor span={node.value} value={source.slice(node.value.start, node.value.end)} display={false} onEdit={onEdit} />
+  if (node.kind === 'math' && node.value) return <MathEditor span={node.value} selectionSpan={node} value={source.slice(node.value.start, node.value.end)} display={false} onEdit={onEdit} />
   if (node.kind === 'reference' || node.kind === 'citation') return <span className={`visual-token ${node.kind}`} title={node.raw}><span>{node.kind === 'reference' ? '↗' : '❝'}</span>{node.value && <Editable span={node.value} raw={source.slice(node.value.start, node.value.end)} onEdit={onEdit} onFocus={onFocus} onBlur={onBlur} />}</span>
   if (node.kind === 'link') return <span className="visual-link" title={node.raw}>↗ {node.children?.length ? node.children.map((child, index) => <Inline key={index} node={child} source={source} onEdit={onEdit} onFocus={onFocus} onBlur={onBlur} caption={caption} />) : node.label && <Editable span={node.label} raw={source.slice(node.label.start, node.label.end)} onEdit={onEdit} onFocus={onFocus} onBlur={onBlur} />}{node.target && node.label !== node.target && <Editable className="visual-link-target" span={node.target} raw={source.slice(node.target.start, node.target.end)} onEdit={onEdit} onFocus={onFocus} onBlur={onBlur} />}</span>
   return caption ? <span className="visual-caption-fallback" title="可在查看源码中精确修改">{readableCaptionCommand(node.raw)}</span> : <code className="visual-inline-source" title="复杂命令：在 Code 模式或源码块中编辑">{node.raw}</code>
@@ -167,23 +197,46 @@ export function VisualEditor({ source, projectId, file, assetPath, draftCards, o
   const renderInline = (nodes: InlineNode[] | undefined) => nodes?.map((node, index) => <Inline key={index} node={node} source={source} onEdit={onEdit} onFocus={onFocus} onBlur={onBlur} />)
   const captureSelection = () => {
     const selection = window.getSelection()
-    if (!selection?.rangeCount) return
-    const editableAt = (node: Node | null) => (node instanceof Element ? node : node?.parentElement)?.closest<HTMLElement>('[data-source-start]')
-    const anchor = editableAt(selection.anchorNode)
-    const focus = editableAt(selection.focusNode)
-    if (!anchor || !focus) return
-    const offset = (editable: HTMLElement, node: Node | null, at: number) => {
-      const start = Number(editable.dataset.sourceStart)
-      const end = Number(editable.dataset.sourceEnd)
+    const host = root.current
+    if (!selection?.rangeCount || !host) return false
+    const range = selection.getRangeAt(0)
+    if (!host.contains(range.startContainer) || !host.contains(range.endContainer)) return false
+    const offset = (node: Node, at: number, endBoundary: boolean) => {
+      const element = node instanceof Element ? node : node.parentElement
+      let item = element?.closest<HTMLElement>('[data-source-start]')
+      if (!item) {
+        // A range can end between inline nodes, rather than inside either node.
+        const children = node.childNodes
+        const neighbor = endBoundary ? children[at - 1] : children[at]
+        const adjacent = neighbor instanceof Element ? neighbor : neighbor?.parentElement
+        const matches = adjacent?.matches('[data-source-start]') ? [adjacent as HTMLElement] : [...(adjacent?.querySelectorAll<HTMLElement>('[data-source-start]') ?? [])]
+        item = endBoundary ? matches.at(-1) : matches[0]
+        if (!item) {
+          const block = element?.closest<HTMLElement>('[data-block-start]')
+          return Number(endBoundary ? block?.dataset.blockEnd : block?.dataset.blockStart)
+        }
+        return Number(endBoundary ? item.dataset.sourceEnd : item.dataset.sourceStart)
+      }
+      const start = Number(item.dataset.sourceStart)
+      const end = Number(item.dataset.sourceEnd)
       if (!Number.isInteger(start) || !Number.isInteger(end)) throw new Error('无效的可视化选区')
-      const range = window.document.createRange()
-      range.selectNodeContents(editable)
-      range.setEnd(node ?? editable, at)
-      return start + sourceOffsetForVisible(source.slice(start, end), range.toString().length)
+      if (item.dataset.sourceAtomic) return endBoundary ? end : start
+      if (!item.contains(node)) return endBoundary ? end : start
+      const prefix = window.document.createRange()
+      prefix.selectNodeContents(item)
+      prefix.setEnd(node, at)
+      return start + sourceOffsetForVisible(source.slice(start, end), prefix.toString().length)
     }
-    try { const a = offset(anchor, selection.anchorNode, selection.anchorOffset); const b = offset(focus, selection.focusNode, selection.focusOffset); onSelection({ start: Math.min(a, b), end: Math.max(a, b) }) } catch { /* ignore transient DOM selection */ }
+    try {
+      const start = offset(range.startContainer, range.startOffset, false)
+      const end = offset(range.endContainer, range.endOffset, true)
+      if (!Number.isFinite(start) || !Number.isFinite(end)) return false
+      onSelection({ start: Math.min(start, end), end: Math.max(start, end) })
+      return true
+    } catch { return false /* ignore transient DOM selection */ }
   }
   const renderBlock = (block: VisualBlock, index: number): ReactNode => {
+    if (block.kind === 'blank' && block.content) return <div key={index} className="visual-blank-line" data-block-start={block.start} data-block-end={block.end}><Editable className="visual-blank-editable" span={block.content} raw={source.slice(block.content.start, block.content.end)} commitOnBlur onEdit={onEdit} onFocus={onFocus} onBlur={onBlur} onDeleteEmpty={() => onEdit(block, block.raw, '')} /></div>
     if (block.kind === 'source') return <SourceBlock key={`${index}-source`} block={block} onEdit={onEdit} />
     if (block.kind === 'figure' || block.kind === 'table') return <MediaCard key={draftCardKey(file, block, source)} block={block} projectId={projectId} source={source} assetPath={assetPath} draftIncluded={draftCards.includes(draftCardKey(file, block, source))} onToggleDraft={onToggleDraft} onEdit={onEdit} onCompile={onCompileCard} onReview={onReviewCard} onFocus={onFocus} onBlur={onBlur} />
     if (block.kind === 'title') return <header key={index} className="visual-title" data-block-start={block.start} data-block-end={block.end}>{block.title ? <h1>{renderInline(block.children)}</h1> : <span>标题</span>}{block.author && <div className="visual-title-author"><Editable span={block.author} raw={source.slice(block.author.start, block.author.end)} prose onEdit={onEdit} onFocus={onFocus} onBlur={onBlur} /></div>}{block.date && <div className="visual-title-date"><Editable span={block.date} raw={source.slice(block.date.start, block.date.end)} prose onEdit={onEdit} onFocus={onFocus} onBlur={onBlur} /></div>}</header>
@@ -194,16 +247,21 @@ export function VisualEditor({ source, projectId, file, assetPath, draftCards, o
     if (block.kind === 'math' && block.content) {
       const value = source.slice(block.content.start, block.content.end)
       const previewValue = /^\s*\\begin\{align/.test(block.raw) ? `\\begin{aligned}${value}\\end{aligned}` : /^\s*\\begin\{gather/.test(block.raw) ? `\\begin{gathered}${value}\\end{gathered}` : value
-      return <div key={index} className="visual-display-math" data-block-start={block.start} data-block-end={block.end}><MathEditor span={block.content} value={value} previewValue={previewValue} display onEdit={onEdit} /></div>
+      return <div key={index} className="visual-display-math" data-block-start={block.start} data-block-end={block.end}><MathEditor span={block.content} selectionSpan={block} value={value} previewValue={previewValue} display onEdit={onEdit} /></div>
     }
     if (block.kind === 'list') { const items = block.items?.map((item, itemIndex) => <li key={itemIndex}>{renderInline(item.children)}</li>); return block.level ? <ol key={index} className="visual-list" data-block-start={block.start} data-block-end={block.end}>{items}</ol> : <ul key={index} className="visual-list" data-block-start={block.start} data-block-end={block.end}>{items}</ul> }
     return null
   }
-  return <div ref={root} className="visual-editor" onScroll={() => { if (scrollFrame.current) return; scrollFrame.current = requestAnimationFrame(() => { scrollFrame.current = 0; reportViewport() }) }} onPointerUp={event => { const block = (event.target as HTMLElement).closest<HTMLElement>('[data-block-start]'); if (block) onSelection({ start: Number(block.dataset.blockStart), end: Number(block.dataset.blockStart) }); captureSelection() }} onKeyUp={captureSelection} onFocusCapture={() => queueMicrotask(captureSelection)} onKeyDown={event => {
+  return <div ref={root} className="visual-editor" onScroll={() => { if (scrollFrame.current) return; scrollFrame.current = requestAnimationFrame(() => { scrollFrame.current = 0; reportViewport() }) }} onPointerDownCapture={() => {
+    const active = window.document.activeElement
+    if (active instanceof HTMLElement && active.classList.contains('visual-editable') && root.current?.contains(active)) {
+      active.contentEditable = 'false'
+      active.blur()
+    }
+  }} onPointerUp={event => { const block = (event.target as HTMLElement).closest<HTMLElement>('[data-block-start]'); queueMicrotask(() => { if (!captureSelection() && block) onSelection({ start: Number(block.dataset.blockStart), end: Number(block.dataset.blockStart) }) }) }} onKeyUp={captureSelection} onFocusCapture={() => queueMicrotask(captureSelection)} onKeyDown={event => {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); (event.target as HTMLElement).blur(); onUndo() }
     if ((event.ctrlKey || event.metaKey) && (event.key.toLowerCase() === 'y' || (event.shiftKey && event.key.toLowerCase() === 'z'))) { event.preventDefault(); (event.target as HTMLElement).blur(); onRedo() }
   }}>
-    <div className="visual-editor-head"><span>可视化编辑 <small>点击正文直接修改；公式可点铅笔编辑源码</small></span></div>
     <div className="visual-page">{!document.documentFound && <p className="visual-warning">未找到完整文档结构，当前以源码块显示。</p>}{document.blocks.map(renderBlock)}</div>
   </div>
 }

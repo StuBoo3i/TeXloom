@@ -1,0 +1,32 @@
+.reference-picker{display:flex;flex-direction:column;gap:11px}
+.reference-search{display:flex;gap:8px}
+.reference-search input,.reference-manual input{min-width:0;width:100%;height:36px;padding:7px 10px;border:1px solid #cbdce8;border-radius:7px;background:#fff;color:#263f59;outline:none}
+.reference-search input:focus,.reference-manual input:focus{border-color:var(--theme-accent);box-shadow:0 0 0 3px var(--theme-accent-soft)}
+.reference-search button{flex:none;border:1px solid var(--theme-accent-border);border-radius:7px;padding:0 11px;background:var(--theme-accent-soft);color:var(--theme-accent-strong);font-size:calc(11px * var(--ui-font-scale));font-weight:700}
+.reference-search button:disabled{opacity:.55}
+.reference-categories{display:flex;flex-wrap:wrap;gap:5px}
+.reference-categories button{border:1px solid transparent;border-radius:6px;padding:5px 8px;background:#f2f6f9;color:#56758d;font-size:calc(11px * var(--ui-font-scale))}
+.reference-categories button.active{border-color:var(--theme-accent-border);background:var(--theme-accent-soft);color:var(--theme-accent-strong);font-weight:700}
+.reference-categories button span{opacity:.65;margin-left:3px}
+.reference-options{min-height:105px;max-height:300px;overflow:auto;display:flex;flex-direction:column;gap:5px;padding:2px}
+.reference-options button{width:100%;text-align:left;display:flex;flex-direction:column;gap:4px;border:1px solid #e2eaf0;border-radius:8px;padding:9px 10px;background:#fbfdff;color:#35536d}
+.reference-options button:hover,.reference-options button.selected{border-color:var(--theme-accent-border);background:var(--theme-accent-soft)}
+.reference-option-top{display:flex;align-items:center;gap:8px;min-width:0}
+.reference-option-top strong{font:600 calc(12px * var(--ui-font-scale)) 'Cascadia Code',Consolas,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.reference-badge{flex:none;min-width:32px;text-align:center;padding:3px 5px;border-radius:4px;background:#e8f1f8;color:var(--theme-accent-strong);font-size:calc(10px * var(--ui-font-scale));font-weight:700}
+.reference-option-title,.reference-option-meta{display:block;padding-left:40px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:calc(11px * var(--ui-font-scale))}
+.reference-option-meta{color:#7990a2}
+.reference-empty{padding:35px 12px;text-align:center;color:#7b91a4;font-size:calc(12px * var(--ui-font-scale))}
+.reference-count,.reference-insert-preview,.reference-refresh-error{margin:0;color:#70879b;font-size:calc(11px * var(--ui-font-scale));line-height:1.5}
+.reference-manual{display:flex;flex-direction:column;gap:6px;color:#4a6b84;font-size:calc(11px * var(--ui-font-scale));font-weight:700}
+.reference-insert-preview code{color:var(--theme-accent-strong)}
+.reference-refresh-error{color:#aa463e}
+:root[data-theme=night] .insert-dialog{background:#202d40;color:#e3edf9;border-color:#344860}
+:root[data-theme=night] .insert-dialog-head,:root[data-theme=night] .insert-dialog-actions{border-color:#344860}
+:root[data-theme=night] .reference-options button,:root[data-theme=night] .reference-categories button,:root[data-theme=night] .reference-search input,:root[data-theme=night] .reference-manual input{background:#27384e;color:#e0eafa;border-color:#45617d}
+:root[data-theme=night] .reference-options button:hover,:root[data-theme=night] .reference-options button.selected,:root[data-theme=night] .reference-categories button.active{background:var(--theme-accent-soft);border-color:var(--theme-accent-border)}
+:root[data-theme=night] .reference-badge{background:#344b68;color:#d8e9ff}
+:root[data-theme=night] .reference-option-meta,:root[data-theme=night] .reference-count,:root[data-theme=night] .reference-manual{color:#a9bdd0}
+:root[data-theme=eye] .insert-dialog{background:#def1e1;color:#263f33;border-color:#a8cdb0}
+:root[data-theme=eye] .reference-options button,:root[data-theme=eye] .reference-categories button{background:#f1faf2;color:#335944;border-color:#b5d6bc}
+:root[data-theme=eye] .reference-options button.selected,:root[data-theme=eye] .reference-categories button.active{background:var(--theme-accent-soft);border-color:var(--theme-accent-border)}

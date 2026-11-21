@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import { readAiSettings } from '../server/ai-settings'
 
 const root = new URL('../', import.meta.url).pathname.replace(/^\/(\w:)/, '$1')
-if ((await readAiSettings(root)).encryptedKey) throw new Error('已有 API Key，跳过测试以避免覆盖用户设置')
+const initial = await readAiSettings(root)
+if (initial.profiles.deepseek.encryptedKey) throw new Error('已有 DeepSeek API Key，跳过测试以避免覆盖用户设置')
 process.env.PORT = '3003'
 const originalFetch = globalThis.fetch
 globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
@@ -23,7 +24,7 @@ async function api(path: string, body?: unknown, method = 'GET') {
   return response
 }
 try {
-  await api('/api/ai/settings', { apiKey: 'mock-key', model: 'deepseek-flash', maxOutputTokens: 512, timeoutSeconds: 30 }, 'PUT')
+  await api('/api/ai/settings', { provider: 'deepseek', apiKey: 'mock-key', model: 'deepseek-flash', maxOutputTokens: 512, timeoutSeconds: 30 }, 'PUT')
   const response = await api('/api/ai/chat', { mode: 'chat', prompt: '打招呼', selectedText: '', context: '' }, 'POST')
   const stream = await response.text()
   assert.match(stream, /你好/)
@@ -34,6 +35,7 @@ try {
   assert.match(await imageResponse.text(), /你好/)
   console.log('AI streaming proxy smoke check passed')
 } finally {
-  await api('/api/ai/settings', { clearKey: true, model: 'deepseek-flash', maxOutputTokens: 2048, timeoutSeconds: 90 }, 'PUT')
+  await api('/api/ai/settings', { provider: 'deepseek', clearKey: true, model: initial.profiles.deepseek.model, maxOutputTokens: initial.profiles.deepseek.maxOutputTokens, timeoutSeconds: initial.profiles.deepseek.timeoutSeconds }, 'PUT')
+  if (initial.provider !== 'deepseek') await api('/api/ai/settings', { provider: initial.provider, model: initial.profiles[initial.provider].model, maxOutputTokens: initial.profiles[initial.provider].maxOutputTokens, timeoutSeconds: initial.profiles[initial.provider].timeoutSeconds }, 'PUT')
   await app.close()
 }
