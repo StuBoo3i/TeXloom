@@ -88,6 +88,75 @@ export function Landing({ onEnter }: { onEnter: () => void }) {
   }, [])
   useEffect(() => {
     const page = pageRef.current
+    if (!page) return
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const sections = [...page.querySelectorAll<HTMLElement>('main > section')]
+    const header = page.querySelector<HTMLElement>('.lp-header')
+    let gateTarget = -1
+    let gateDirection = 0
+    let gateDistance = 0
+    let lockedUntil = 0
+
+    const resetGate = () => {
+      gateTarget = -1
+      gateDirection = 0
+      gateDistance = 0
+    }
+
+    const onWheel = (event: WheelEvent) => {
+      if (reducedMotion.matches || event.defaultPrevented || event.ctrlKey || event.metaKey || event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return
+      const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? window.innerHeight : 1
+      const delta = event.deltaY * unit
+      if (!delta) return
+      const now = performance.now()
+      if (now < lockedUntil) {
+        event.preventDefault()
+        return
+      }
+
+      const headerHeight = header?.getBoundingClientRect().height ?? 0
+      const maxScroll = Math.max(0, document.documentElement.scrollHeight - window.innerHeight)
+      const positions = sections.map(section => Math.min(maxScroll, Math.max(0, section.getBoundingClientRect().top + window.scrollY - headerHeight)))
+      let current = positions.length - 1
+      while (current > 0 && positions[current] > window.scrollY + 2) current--
+      const direction = Math.sign(delta)
+      const destination = direction > 0 ? positions[current + 1] : positions[current - 1]
+      const edgeDistance = direction > 0 ? destination - window.scrollY : window.scrollY - positions[current]
+      if (destination === undefined || edgeDistance > 180 || edgeDistance < -2) {
+        resetGate()
+        return
+      }
+
+      event.preventDefault()
+      if (gateTarget !== destination || gateDirection !== direction) {
+        gateDistance = 0
+      }
+      gateTarget = destination
+      gateDirection = direction
+      gateDistance += Math.min(Math.abs(delta), 120)
+      if (gateDistance < 140) return
+
+      resetGate()
+      lockedUntil = now + 420
+      window.scrollTo({ top: destination, behavior: 'smooth' })
+    }
+
+    window.addEventListener('wheel', onWheel, { passive: false })
+    const clear = () => { resetGate(); lockedUntil = 0 }
+    window.addEventListener('pointerdown', clear)
+    window.addEventListener('keydown', clear)
+    window.addEventListener('hashchange', clear)
+    reducedMotion.addEventListener('change', clear)
+    return () => {
+      window.removeEventListener('wheel', onWheel)
+      window.removeEventListener('pointerdown', clear)
+      window.removeEventListener('keydown', clear)
+      window.removeEventListener('hashchange', clear)
+      reducedMotion.removeEventListener('change', clear)
+    }
+  }, [])
+  useEffect(() => {
+    const page = pageRef.current
     if (!page || !('IntersectionObserver' in window)) return
     const items = [...page.querySelectorAll<HTMLElement>('.lp-reveal')]
     const observer = new IntersectionObserver(entries => entries.forEach(entry => {
