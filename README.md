@@ -13,11 +13,12 @@
 
 ## 功能一览
 
-![TeXloom 产品亮点：LaTeX 编辑、双向定位、本地保存与 GitHub 协作](docs/images/landing-features.png)
+[![TeXloom 介绍页的四项亮点：多厂商 Agent、Visual 编辑、Git 协作、远程与本地工作空间](docs/images/landing-features.png)](https://stuboo3i.github.io/TeXloom/#features)
 
-| 写作与预览 | 项目管理 | 协作与扩展 |
-| --- | --- | --- |
-| Code / Visual 双模式、Monaco 上下文补全、图表卡片、PDF 预览与 SyncTeX 双向定位 | 项目分类与标签、批量导入导出、文件树、全文搜索、历史快照 | GitHub 私有仓库分支协作与审阅；Agent CLI 支持多服务商、多账号接力，AI API 提供写作与宏包工具 |
+- **一份论文，多位 Agent。** 在群聊式的项目会话中，按需让 Codex、Gemini、Claude Code 或豆包 CLI 接续讨论，共同完善一份草稿。审阅每处差异后，再决定采纳哪些修改。
+- **Visual，像在成稿上落笔。** 以阅读 PDF 的方式浏览论文，直接编辑正文，原位预览公式。图表各有卡片，编译后的 PDF 在旁边对照，随时可以切回 Code 调整同一份 LaTeX。
+- **Git 协作，分支并行，审阅合稿。** 团队成员在各自分支上并行写作，同步评论和建议。采纳前核对原文，工作台限制直推主分支，再通过 Pull Request 审阅合稿。
+- **远程与本地，流畅衔接。** 打开本地项目，或从 GitHub 拉取后在本机继续编辑。两种方式都支持 LaTeX 补全、本地编译，以及源码和 PDF 之间的双向定位。
 
 ## 一份论文，多位智能助手
 

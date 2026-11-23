@@ -1,5 +1,5 @@
 import { useEffect, useRef, type MouseEvent, type ReactNode } from 'react'
-import { ArrowDown, ArrowRight, ArrowUpRight, BookOpenText, Check, Code2, FileCode2, FileText, GitBranch, Github, Image as ImageIcon, LockKeyhole, MousePointer2, PanelRight, Pencil, ShieldCheck, Sparkles, FolderOpen, MessageSquareText, WandSparkles } from 'lucide-react'
+import { ArrowDown, ArrowRight, ArrowUpRight, BookOpenText, Check, Code2, FileCode2, FileText, GitBranch, Github, Image as ImageIcon, Laptop, PanelRight, Pencil, ShieldCheck, Sparkles, FolderOpen, MessageSquareText, WandSparkles } from 'lucide-react'
 import './landing.css'
 
 const githubUrl = 'https://github.com/StuBoo3i/TeXloom'
@@ -9,10 +9,38 @@ const homeUrl = import.meta.env.BASE_URL
 const iconUrl = `${homeUrl}icon.png`
 
 const features = [
-  { number: '01', icon: <FileCode2 size={24} strokeWidth={1.65} />, title: '两种视图，一份 LaTeX 源码', copy: '在 Visual 中阅读、修改正文与公式；需要精确控制时切回 Code。两种模式共用保存、撤销和编译。', accent: 'blue' },
-  { number: '02', icon: <MousePointer2 size={24} strokeWidth={1.65} />, title: '源码与 PDF，双向抵达', copy: '编辑器与预览并排工作。通过 SyncTeX 在源码和成稿之间定位，修改不再靠翻页寻找。', accent: 'cyan' },
-  { number: '03', icon: <LockKeyhole size={24} strokeWidth={1.65} />, title: '你的文件，留在你的电脑', copy: '选择自己的项目目录，用本地 Tectonic 编译。写作数据由你掌控，无需建立平台账户。', accent: 'sand' },
-  { number: '04', icon: <Sparkles size={24} strokeWidth={1.65} />, title: '多家智能助手，接力完善文章', copy: '按需切换 Agent CLI 与 AI API；项目对话可共享近期上下文，文件修改先看差异再应用。', accent: 'lavender' },
+  {
+    href: '#ai',
+    icon: MessageSquareText,
+    accent: 'lavender',
+    title: '一份论文，多位 Agent',
+    copy: '在群聊式的项目会话中，按需邀请 Codex、Gemini、Claude Code 或豆包 CLI 接续讨论。从梳理论证到核对公式，多位助手可以完善同一份草稿。每一处修改，由你审阅后采纳。',
+    link: '探索多厂商 Agent',
+  },
+  {
+    href: '#visual',
+    icon: Pencil,
+    accent: 'blue',
+    title: 'Visual，像在成稿上落笔',
+    copy: '以阅读 PDF 的方式浏览论文，在正文中直接落笔。公式原位预览，图表各有卡片，编译后的 PDF 就在一旁。需要细调时，切回 Code 编辑同一份 LaTeX。',
+    link: '探索 Visual 编辑',
+  },
+  {
+    href: '#collaboration',
+    icon: GitBranch,
+    accent: 'cyan',
+    title: 'Git 协作，分支并行，审阅合稿',
+    copy: '团队成员在各自的分支上并行写作，评论与建议随审阅记录同步。采纳前核对原文，工作台限制直推主分支。各自的成果通过 Pull Request 汇入同一份论文。',
+    link: '了解 Git 协作',
+  },
+  {
+    href: '#local',
+    icon: Laptop,
+    accent: 'sand',
+    title: '远程与本地，流畅衔接',
+    copy: '打开本地项目，或从 GitHub 拉取后在本机接着写。两种方式共享同一套编辑体验：LaTeX 补全随写随用，本地编译随时检验排版，源码与 PDF 双向定位。',
+    link: '探索工作空间',
+  },
 ]
 
 function WorkspaceLink({ children, className, onEnter }: { children: ReactNode; className: string; onEnter: () => void }) {
@@ -178,7 +206,21 @@ export function Landing({ onEnter }: { onEnter: () => void }) {
       <LocalShowcase onEnter={onEnter} />
       <AiShowcase onEnter={onEnter} />
 
-      <section id="features" className="lp-features lp-container"><div className="lp-section-heading lp-reveal"><div><span className="lp-section-index">05 / THE ESSENTIALS</span><h2>一切围绕写作，<br />细节服务于思考。</h2></div><p>专业工具应当安静而可靠。TeXloom 将源码、成稿与项目组织放在你需要的位置。</p></div><div className="lp-feature-grid">{features.map(feature => <article className={`lp-feature lp-feature-${feature.accent} lp-reveal`} key={feature.number}><div className="lp-feature-top"><span className="lp-feature-icon">{feature.icon}</span><span className="lp-feature-number">{feature.number}</span></div><h3>{feature.title}</h3><p>{feature.copy}</p><span className="lp-feature-rule" /></article>)}</div></section>
+      <section id="features" className="lp-features lp-container" aria-labelledby="features-heading">
+        <div className="lp-section-heading lp-reveal"><h2 id="features-heading">功能一览</h2></div>
+        <div className="lp-feature-grid">
+          {features.map(({ href, icon: Icon, accent, title, copy, link }) => (
+            <article className={`lp-feature lp-feature-${accent} lp-reveal`} key={href}>
+              <div className="lp-feature-top">
+                <span className="lp-feature-icon" aria-hidden="true"><Icon size={24} strokeWidth={1.65} /></span>
+                <h3>{title}</h3>
+              </div>
+              <p>{copy}</p>
+              <a className="lp-feature-link" href={href}>{link}</a>
+            </article>
+          ))}
+        </div>
+      </section>
 
       <section id="workflow" className="lp-workflow"><div className="lp-container lp-workflow-inner"><div className="lp-workflow-intro lp-reveal"><span className="lp-section-index">06 / THE FLOW</span><h2>从眼前的文字，<br />到可以分享的论文。</h2><p>Visual 帮你专注内容，Code 让每一处细节可控；TeXloom 在本机编译正式 PDF。</p><WorkspaceLink className="lp-workflow-link" onEnter={onEnter}>{publicSite ? '查看项目源码' : '现在开始'} <ArrowRight size={18} /></WorkspaceLink></div><div className="lp-workflow-steps lp-reveal"><div><span>01</span><i><FileCode2 size={24} /></i><h3>写</h3><p>在 Visual 或 Code 中编辑同一份 LaTeX。</p></div><div><span>02</span><i><BookOpenText size={24} /></i><h3>编译</h3><p>本地 Tectonic 生成 PDF，随时对照。</p></div><div><span>03</span><i><GitBranch size={24} /></i><h3>协作</h3><p>用 GitHub 分支和审阅记录汇集意见。</p></div></div></div></section>
 
