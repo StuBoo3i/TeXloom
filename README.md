@@ -93,9 +93,17 @@ flowchart LR
 | Claude Code | 每个账号单独填写 Anthropic API Key，并使用独立配置目录 | 可设置模型和受支持的智能程度 |
 | 豆包 CLI | 当前使用系统默认登录账号；TeXloom 不自动安装 | 模型与智能程度由豆包 CLI 管理 |
 
+![TeXloom 工作台：Agent CLI 与 Visual 编辑并排工作](docs/images/agent-cli-workspace.png)
+
+*在同一工作台中与 Agent 讨论论文，同时查看 Visual 正文与公式。*
+
 1. 在“设置 → Agent CLI”选择服务商与账号。Codex、Gemini 和豆包可打开系统终端登录；Claude Code 在此填写 API Key。可为支持的 CLI 设置模型、智能程度、超时和跨账号背景共享轮数。
 2. Codex CLI 在 `data/agent-workspaces/` 下的项目草稿目录运行，沿用该账号的原生登录、配置、会话和工具能力。草稿有独立的本地 Git 基线，不继承 TeXloom 或项目仓库的远程地址。它自行决定查看文件、运行命令或修改草稿；CLI 使用工作区写入模式且不逐项审批，采纳前不会通过 TeXloom 写入原项目。
 3. 所有 Agent 共用当前项目的草稿，可接着其他 Agent 的未采纳修改继续完善。完成后点击“查看差异并采纳”，可按文件或文本片段选择；新增、删除、图片和其他二进制文件也会列出。采纳时会再次核对原项目文件，冲突时显示原始、当前和草稿版本，不覆盖当前文件。应用成功后刷新 Code／Visual、文件树与引用，并重新编译 PDF。放弃草稿后工作副本会被清理。
+
+![TeXloom Agent 草稿审阅：逐文件、逐片段对照原文与修改](docs/images/agent-review.png)
+
+*逐项核对 Agent 草稿，只采纳确认过的文件或文本片段。*
 
 CLI 会话与待审阅差异保存在 `data/agent-sessions/`，账号配置保存在 `data/agent-profiles.json`，均不随 Git 项目同步。Claude Code 的 API Key 由 Windows 当前用户的 DPAPI 加密。Agent CLI 与原有 AI API 写作助手相互独立；安装与使用外部 CLI 需遵循各服务商的要求。豆包 CLI 命令参见其[官方文档](https://www.doubao.com/work/docs/zh-cn/doubao-cli)。
 
