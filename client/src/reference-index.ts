@@ -1,6 +1,7 @@
 export type ReferenceKind = 'figure' | 'table' | 'equation' | 'section' | 'other'
-export type ReferenceItem = { value: string; file: string; kind: ReferenceKind; title: string }
-export type CitationItem = { value: string; file: string; source: 'bib' | 'thebibliography'; title: string; detail: string }
+type ReferenceLocation = { value: string; file: string; offset: number; title: string }
+export type ReferenceItem = ReferenceLocation & { kind: ReferenceKind }
+export type CitationItem = ReferenceLocation & { source: 'bib' | 'thebibliography'; detail: string }
 export type ReferenceIndex = { references: ReferenceItem[]; citations: CitationItem[] }
 export type IndexedSource = { file: string; source: string }
 
@@ -80,7 +81,7 @@ function bibEntries(file: string, source: string): CitationItem[] {
     const title = bibField(body, 'title')
     const author = bibField(body, 'author')
     const year = bibField(body, 'year')
-    entries.push({ value: header[1], file, source: 'bib', title: title || header[1], detail: [author, year].filter(Boolean).join(' · ') })
+    entries.push({ value: header[1], file, offset: match.index, source: 'bib', title: title || header[1], detail: [author, year].filter(Boolean).join(' · ') })
   }
   return entries
 }
@@ -90,8 +91,8 @@ function texEntries(file: string, source: string): ReferenceIndex {
   const envs = environments(masked)
   const headings = [...masked.matchAll(/\\(?:part|chapter|section|subsection|subsubsection|paragraph|subparagraph)\*?(?:\[[^\]]*\])?\s*\{/g)].map(match => {
     const title = group(masked, match.index + match[0].length - 1)
-    return title ? { end: title.end + 1, title: readable(source.slice(title.start, title.end)) } : null
-  }).filter((item): item is { end: number; title: string } => Boolean(item))
+    return title ? { start: match.index, end: title.end + 1, title: readable(source.slice(title.start, title.end)) } : null
+  }).filter(item => item !== null)
   const references: ReferenceItem[] = []
   for (const match of masked.matchAll(/\\label\s*\{([^{}]+)\}/g)) {
     const value = match[1].trim()
@@ -101,7 +102,8 @@ function texEntries(file: string, source: string): ReferenceIndex {
     const name = named?.name ?? ''
     let kind: ReferenceKind = /^figure/.test(name) ? 'figure' : /^(table|longtable)/.test(name) ? 'table' : /^(equation|align|gather|multline|eqnarray)/.test(name) ? 'equation' : 'other'
     const heading = [...headings].reverse().find(item => item.end <= match.index)
-    if (kind === 'other' && heading && /^\s*$/.test(masked.slice(heading.end, match.index))) kind = 'section'
+    const attachedHeading = kind === 'other' && heading && /^\s*$/.test(masked.slice(heading.end, match.index)) ? heading : undefined
+    if (attachedHeading) kind = 'section'
     if (kind === 'other') kind = /^(fig|figure)[:._-]/i.test(value) ? 'figure' : /^(tab|table)[:._-]/i.test(value) ? 'table' : /^(eq|equation)[:._-]/i.test(value) ? 'equation' : /^(sec|section|chap)[:._-]/i.test(value) ? 'section' : 'other'
     let title = ''
     if (named && (kind === 'figure' || kind === 'table')) {
@@ -114,7 +116,7 @@ function texEntries(file: string, source: string): ReferenceIndex {
     }
     if (kind === 'section') title ||= heading?.title ?? ''
     if (kind === 'equation' && named) title = readable(source.slice(named.start, named.end).replace(/\\label\s*\{[^{}]+\}/g, '')).slice(0, 100)
-    references.push({ value, file, kind, title })
+    references.push({ value, file, offset: attachedHeading?.start ?? match.index, kind, title })
   }
   const citations: CitationItem[] = []
   for (const env of envs.filter(item => item.name === 'thebibliography')) {
@@ -124,7 +126,7 @@ function texEntries(file: string, source: string): ReferenceIndex {
       const start = env.start + item.index + item[0].length
       const end = i + 1 < items.length ? env.start + items[i + 1].index : env.end - '\\end{thebibliography}'.length
       const title = readable(source.slice(start, end))
-      citations.push({ value: item[1].trim(), file, source: 'thebibliography', title: title || item[1].trim(), detail: '文内参考文献' })
+      citations.push({ value: item[1].trim(), file, offset: env.start + item.index, source: 'thebibliography', title: title || item[1].trim(), detail: '文内参考文献' })
     }
   }
   return { references, citations }

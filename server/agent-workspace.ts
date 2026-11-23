@@ -4,6 +4,7 @@ import { copyFile, lstat, mkdir, readFile, readdir, rename, rm, stat, writeFile 
 import path from 'node:path'
 import type { AgentChange } from './agent-cli.js'
 import { applyLineHunks, lineHunks } from '../shared/agent-hunks.js'
+import type { AgentResolution } from '../shared/agent-review.js'
 
 const maxFiles = 1000
 const maxBytes = 250 * 1024 * 1024
@@ -82,7 +83,7 @@ export async function listWorkspaceFiles(root: string): Promise<Map<string, stri
   return found
 }
 
-function previewText(bytes: Buffer): string | undefined {
+export function previewText(bytes: Buffer): string | undefined {
   if (bytes.includes(0)) return undefined
   try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes) }
   catch { return undefined }
@@ -141,18 +142,41 @@ export async function applyAgentChanges(
   projectFile: (relative: string) => Promise<string>,
   beforeApply: () => Promise<void> = async () => {},
   hunkSelections: Record<string, number[]> = {},
+  resolutions: Record<string, AgentResolution> = {},
 ): Promise<string[]> {
   await Promise.all([listWorkspaceFiles(base), listWorkspaceFiles(work)])
-  const prepared: { change: AgentChange; target: string; baseFile: string; before?: Buffer; after?: Buffer }[] = []
+  const updates: { file: string; before?: Buffer; after?: Buffer }[] = []
+  const checked: { file: string; hash?: string; path: string }[] = []
+  const unified: { path: string; files: string[]; hash?: string }[] = []
+  const applied: string[] = []
   const conflicts: string[] = []
   for (const change of changes) {
     const target = await projectFile(change.path)
     const baseFile = workspaceFile(base, change.path)
     const afterFile = workspaceFile(work, change.path)
     const [before, current, after] = await Promise.all([readWorkspaceFile(baseFile), readWorkspaceFile(target), readWorkspaceFile(afterFile)])
-    if ((before ? hashBytes(before) : undefined) !== change.beforeHash ||
-        (after ? hashBytes(after) : undefined) !== change.afterHash) throw new Error(`${change.path} 的草稿已变化，请刷新差异后重试`)
-    if ((current ? hashBytes(current) : undefined) !== change.beforeHash) conflicts.push(change.path)
+    const beforeHash = before && hashBytes(before)
+    const afterHash = after && hashBytes(after)
+    const currentHash = current && hashBytes(current)
+    const resolution = Object.hasOwn(resolutions, change.path) ? resolutions[change.path] : undefined
+    if (beforeHash !== change.beforeHash || afterHash !== change.afterHash
+      || (resolution && (resolution.beforeHash !== (beforeHash ?? null) || resolution.afterHash !== (afterHash ?? null) || resolution.currentHash !== (currentHash ?? null)))
+      || (!resolution && currentHash !== beforeHash)) {
+      conflicts.push(change.path)
+      continue
+    }
+    checked.push({ file: target, hash: currentHash, path: change.path }, { file: baseFile, hash: beforeHash, path: change.path }, { file: afterFile, hash: afterHash, path: change.path })
+    if (resolution) {
+      const keep = resolution.choice === 'current'
+      const winner = keep ? current : after
+      const hash = keep ? currentHash : afterHash
+      unified.push({ path: change.path, files: [target, baseFile, afterFile], hash })
+      if (currentHash !== hash) updates.push({ file: target, before: current, after: winner })
+      if (beforeHash !== hash) updates.push({ file: baseFile, before, after: winner })
+      if (afterHash !== hash) updates.push({ file: afterFile, before: after, after: winner })
+      if (!keep) applied.push(change.path)
+      continue
+    }
     let chosenAfter = after
     if (Object.hasOwn(hunkSelections, change.path)) {
       if (!before || !after || change.kind !== 'modified' || before.includes(0) || after.includes(0)) throw new Error(`${change.path} 不支持按段采纳`)
@@ -161,37 +185,41 @@ export async function applyAgentChanges(
       if (!hunks || !Array.isArray(selected) || !selected.length || new Set(selected).size !== selected.length || selected.some(index => !Number.isInteger(index) || index < 0 || index >= hunks.length)) throw new Error(`${change.path} 的采纳片段无效`)
       chosenAfter = Buffer.from(applyLineHunks(before.toString('utf8'), hunks, new Set(selected)), 'utf8')
     }
-    prepared.push({ change, target, baseFile, before, after: chosenAfter })
+    applied.push(change.path)
+    updates.push({ file: target, before: current, after: chosenAfter }, { file: baseFile, before, after: chosenAfter })
   }
   if (conflicts.length) throw Object.assign(new Error(`原项目已变化，需先核对冲突：${conflicts.join('、')}`), { statusCode: 409, conflicts })
-  await beforeApply()
+  if (applied.length) await beforeApply()
   const changedDuringSnapshot: string[] = []
-  for (const item of prepared) {
-    const current = await readWorkspaceFile(item.target)
-    if ((current ? hashBytes(current) : undefined) !== item.change.beforeHash) changedDuringSnapshot.push(item.change.path)
+  for (const { file, hash, path } of checked) {
+    const bytes = await readWorkspaceFile(file)
+    if ((bytes && hashBytes(bytes)) !== hash && !changedDuringSnapshot.includes(path)) changedDuringSnapshot.push(path)
   }
   if (changedDuringSnapshot.length) throw Object.assign(new Error(`原项目已变化，需先核对冲突：${changedDuringSnapshot.join('、')}`), { statusCode: 409, conflicts: changedDuringSnapshot })
-  const written: typeof prepared = []
+  const written: typeof updates = []
   try {
-    for (const item of prepared) {
-      if (item.after) await writeAtomic(item.target, item.after)
-      else await rm(item.target, { force: true })
+    for (const item of updates) {
+      if (item.after) await writeAtomic(item.file, item.after)
+      else await rm(item.file, { force: true })
       written.push(item)
     }
-    for (const item of prepared) {
-      if (item.after) await writeAtomic(item.baseFile, item.after)
-      else await rm(item.baseFile, { force: true })
+    for (const { path, files, hash } of unified) {
+      for (const file of files) {
+        const bytes = await readWorkspaceFile(file)
+        if ((bytes && hashBytes(bytes)) !== hash) {
+          throw Object.assign(new Error(path + ' 在同步期间再次变化，请刷新差异后重试'), { statusCode: 409 })
+        }
+      }
     }
   } catch (error) {
-    for (const item of [...prepared].reverse()) {
-      if (item.before) await writeAtomic(item.baseFile, item.before)
-      else await rm(item.baseFile, { force: true })
-    }
     for (const item of written.reverse()) {
-      if (item.before) await writeAtomic(item.target, item.before)
-      else await rm(item.target, { force: true })
+      const current = await readWorkspaceFile(item.file)
+      // Keep any new write that happened after this batch updated the file.
+      if (current ? !item.after || !current.equals(item.after) : item.after !== undefined) continue
+      if (item.before) await writeAtomic(item.file, item.before)
+      else await rm(item.file, { force: true })
     }
     throw error
   }
-  return changes.map(change => change.path)
+  return applied
 }

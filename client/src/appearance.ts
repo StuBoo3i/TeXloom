@@ -1,13 +1,21 @@
-export type ThemeId = 'academic' | 'ocean' | 'violet' | 'forest' | 'night' | 'eye'
+export type ThemeId = 'academic' | 'ocean' | 'violet' | 'forest' | 'night' | 'eye' | 'vermilion' | 'cobalt' | 'miku'
 export type FontId = 'system' | 'sans' | 'serif' | 'mono'
 export type Appearance = { theme: ThemeId; font: FontId; size: number }
+
+export const mikuArtwork = '/miku-studio.jpg'
+export const mikuSidebarArtwork = '/miku-sidebar.jpg'
+
+export const signatureThemes: { id: ThemeId; name: string; swatch: string; caption: string }[] = [
+  { id: 'vermilion', name: '朱砂卷宗', swatch: 'linear-gradient(135deg, #fff7e9 55%, #9e342d 56%)', caption: '暖纸 · 朱砂' },
+  { id: 'cobalt', name: '钴蓝图谱', swatch: 'linear-gradient(135deg, #eaf1ff 55%, #2148a0 56%)', caption: '冷白 · 钴蓝' },
+  { id: 'night', name: '午夜墨金', swatch: 'linear-gradient(135deg, #181923 55%, #e5b975 56%)', caption: '墨黑 · 暖金' },
+]
 
 export const themes: { id: ThemeId; name: string; swatch: string }[] = [
   { id: 'academic', name: '学术蓝', swatch: '#286799' },
   { id: 'ocean', name: '海洋青', swatch: '#168b95' },
   { id: 'violet', name: '书卷紫', swatch: '#7364ab' },
   { id: 'forest', name: '森林绿', swatch: '#43836b' },
-  { id: 'night', name: '夜间模式', swatch: '#263650' },
   { id: 'eye', name: '豆沙绿护眼', swatch: '#c7edcc' },
 ]
 
@@ -19,7 +27,8 @@ export const fontFamilies: Record<FontId, string> = {
 }
 
 const defaults: Appearance = { theme: 'academic', font: 'system', size: 14 }
-const validThemes = new Set(themes.map(theme => theme.id))
+const signatureIds = new Set<ThemeId>([...signatureThemes.map(theme => theme.id), 'miku'])
+const validThemes = new Set([...signatureIds, ...themes.map(theme => theme.id)])
 
 export function normalizeAppearance(input: Partial<Appearance> | null | undefined): Appearance {
   return {
@@ -36,9 +45,11 @@ export function readAppearance(): Appearance {
 
 export function applyAppearance(value: Appearance): void {
   const appearance = normalizeAppearance(value)
-  document.documentElement.dataset.theme = appearance.theme
-  document.documentElement.style.setProperty('--ui-font-family', fontFamilies[appearance.font])
-  document.documentElement.style.setProperty('--ui-font-scale', String(appearance.size / 14))
+  const root = document.documentElement
+  root.dataset.theme = appearance.theme
+  root.toggleAttribute('data-signature-theme', signatureIds.has(appearance.theme))
+  root.style.setProperty('--ui-font-family', fontFamilies[appearance.font])
+  root.style.setProperty('--ui-font-scale', String(appearance.size / 14))
 }
 
 export function saveAppearance(value: Appearance): void {

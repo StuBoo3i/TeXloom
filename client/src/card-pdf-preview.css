@@ -9,8 +9,8 @@
 .card-pdf-stage{box-sizing:border-box;display:flex;align-items:flex-start;justify-content:center;max-height:520px;min-height:100px;overflow:auto;padding:15px;background:#e9eef2}
 .card-pdf-stage canvas{display:block;width:100%;max-width:760px;height:auto;box-shadow:0 2px 12px #19355022;background:#fff}
 .card-pdf-message{align-self:center;padding:24px;color:#58758d;text-align:center;font:12px var(--ui-font-family,system-ui)}
-:root[data-theme=night] .card-pdf{background:#253a50}
-:root[data-theme=night] .card-pdf-toolbar{background:#1b2d40;color:#d1e2f0}
-:root[data-theme=night] .card-pdf-stage{background:#172438}
+:root:is([data-theme=night], [data-theme=miku]) .card-pdf{background:var(--night-control)}
+:root:is([data-theme=night], [data-theme=miku]) .card-pdf-toolbar{background:var(--night-panel);color:var(--theme-text)}
+:root:is([data-theme=night], [data-theme=miku]) .card-pdf-stage{background:var(--night-panel)}
 :root[data-theme=eye] .card-pdf-stage{background:#d7e9da}
 @media(max-width:620px){.card-pdf-toolbar{align-items:flex-start;flex-direction:column;gap:2px}.card-pdf-stage{max-height:430px;padding:8px}}

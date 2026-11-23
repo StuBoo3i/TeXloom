@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { parseVisualLatex, replaceSourceSpan, encodeText, sourceOffsetForVisible, visibleOffsetForSource } from '../client/src/visual-latex'
+import katex from 'katex'
+import { adjacentBlank, decodeText, parseVisualLatex, replaceSourceSpan, encodeText, sourceOffsetForVisible, visibleOffsetForSource } from '../client/src/visual-latex'
 
 const sample = [
   '% !TEX program = xelatex\r\n',
@@ -58,6 +59,11 @@ test('空行保留独立插入位置及原有换行符', () => {
   const deleted = replaceSourceSpan(source, blanks[0], blanks[0].raw, '')
   assert.ok(deleted.includes('\\section{标题}\r\n  \r\n第一段'))
   assert.equal(parseVisualLatex(deleted).blocks.filter(block => block.kind === 'blank').length, 2)
+  const between = blanks[2]
+  const backspace = adjacentBlank(blanks, source, source.indexOf('第二段'), 'before')
+  assert.equal(backspace, between)
+  assert.equal(replaceSourceSpan(source, backspace!, backspace!.raw, '').includes('第一段\r\n第二段'), true)
+  assert.equal(adjacentBlank(blanks, source, between.start, 'after'), between)
 })
 
 test('未闭合或不支持的内容显示源码块', () => {
@@ -90,11 +96,45 @@ test('独立的 label 保留在源码中，但不生成可视化源码块', () =
   assert.ok(!parsed.blocks.some(block => block.kind === 'paragraph' && block.children?.some(node => node.raw.includes('\\label'))))
 })
 
+test('分页与浮动屏障命令保留源码但不显示在 Visual 正文', () => {
+  const source = '\\begin{document}\n前文。\\FloatBarrier 后文。\n\\clearpage\n\\newpage\n\\pagebreak[2]\n\\nopagebreak[3]\n\\FloatBarrier\n末段。\n\\end{document}'
+  const parsed = parseVisualLatex(source)
+  assert.equal(parsed.source, source)
+  assert.ok(!parsed.blocks.some(block => block.kind === 'source' && /(?:clearpage|newpage|pagebreak|FloatBarrier)/.test(block.raw)))
+  assert.ok(!parsed.blocks.some(block => block.children?.some(node => node.kind === 'source' && /(?:clearpage|newpage|pagebreak|FloatBarrier)/.test(node.raw))))
+  const first = parsed.blocks.find(block => block.kind === 'paragraph')!
+  assert.ok(first.children?.some(node => node.kind === 'text' && node.raw.includes('前文。')))
+  assert.ok(first.children?.some(node => node.kind === 'text' && node.raw.includes('后文。')))
+  const edited = replaceSourceSpan(source, first.children![0], first.children![0].raw, '新前文。')
+  assert.ok(edited.includes('\\FloatBarrier'))
+  assert.ok(edited.includes('\\clearpage'))
+})
+
 test('Visual 选区转换回源码位置时保留转义字符偏移', () => {
   assert.equal(sourceOffsetForVisible('甲\\%乙', 2), 3)
   assert.equal(sourceOffsetForVisible('a\r\nb', 2), 3)
   assert.equal(sourceOffsetForVisible('abc', 3), 3)
   assert.equal(visibleOffsetForSource('甲\\%乙', 3), 2)
+})
+
+test('Visual 正文中的普通反斜杠保留为可编辑文字及正确的源码范围', () => {
+  const escaped = encodeText('\\甲')
+  assert.equal(escaped, '\\textbackslash{}甲')
+  const source = ['\\begin{document}', escaped, '\\end{document}'].join('\n')
+  const paragraph = parseVisualLatex(source).blocks.find(block => block.kind === 'paragraph')
+  const text = paragraph?.children?.[0]
+  assert.equal(text?.kind, 'text')
+  assert.equal(decodeText(text!.raw).trimEnd(), '\\甲')
+  assert.equal(sourceOffsetForVisible(text!.raw, 1), '\\textbackslash{}'.length)
+  assert.equal(visibleOffsetForSource(text!.raw, '\\textbackslash{}'.length), 1)
+})
+
+test('在空行插入引用后仍可编辑引用后面的正文', () => {
+  const source = ['\\begin{document}', '\\citep{demo} 后续。', '', '\\autoref{fig:demo} 正文。', '\\end{document}'].join('\n')
+  const paragraphs = parseVisualLatex(source).blocks.filter(block => block.kind === 'paragraph')
+  assert.deepEqual(paragraphs.map(block => block.children?.map(node => node.kind)), [['citation', 'text'], ['reference', 'text']])
+  assert.equal(paragraphs[0].children?.[1].raw.trim(), '后续。')
+  assert.equal(paragraphs[1].children?.[1].raw.trim(), '正文。')
 })
 
 test('跨公式选区使用完整 LaTeX 源码而非渲染文本', () => {
@@ -104,6 +144,54 @@ test('跨公式选区使用完整 LaTeX 源码而非渲染文本', () => {
   const formula = nodes.find(node => node.kind === 'math')!
   assert.equal(source.slice(formula.start, formula.end), '$x^2+y^2=z^2$')
   assert.equal(source.slice(nodes[0].start, nodes.at(-1)!.end), '公式前 $x^2+y^2=z^2$ 公式后。\n')
+})
+
+test('列表项内的独立公式按数学节点解析', () => {
+  const source = String.raw`\begin{document}
+\begin{enumerate}
+\item 分解后有
+\[
+\alpha(F)=\sum_{i=1}^{r}\alpha(F_i).
+\]
+继续说明。
+\end{enumerate}
+\end{document}`
+  const list = parseVisualLatex(source).blocks.find(block => block.kind === 'list')!
+  const math = list.items?.[0].children.find(node => node.kind === 'math')!
+  assert.equal(math.display, true)
+  assert.equal(source.slice(math.value!.start, math.value!.end).trim(), '\\alpha(F)=\\sum_{i=1}^{r}\\alpha(F_i).')
+  assert.match(katex.renderToString(source.slice(math.value!.start, math.value!.end), { displayMode: true, throwOnError: true }), /katex-display/)
+  assert.ok(!list.items?.[0].children.some(node => node.kind === 'text' && node.raw.includes('\\[')))
+})
+
+test('算法 quote 展示标题、正文、列表和独立公式，保留完整源码', () => {
+  const source = String.raw`\begin{document}
+\begin{quote}
+\begin{minipage}{\linewidth}
+\kaishu
+\noindent\rule{\linewidth}{0.5pt}\par\nobreak
+\noindent{\heiti 算法：独立集分支搜索}\par\nobreak
+输入：图 $F$。
+
+{\heiti 初始化。}选取节点。
+\begin{enumerate}
+\item 删除邻居。
+\end{enumerate}
+\[
+\alpha(F)=\sum_{i=1}^{r}\alpha(F_i).
+\]
+\par\noindent\rule{\linewidth}{0.5pt}
+\end{minipage}
+\end{quote}
+\end{document}`
+  const algorithm = parseVisualLatex(source).blocks.find(block => block.kind === 'algorithm')!
+  assert.equal(algorithm.name, '独立集分支搜索')
+  assert.equal(source.slice(algorithm.start, algorithm.end), algorithm.raw)
+  assert.ok(algorithm.body?.some(block => block.kind === 'list'))
+  const math = algorithm.body?.find(block => block.kind === 'math')!
+  assert.match(katex.renderToString(source.slice(math.content!.start, math.content!.end), { throwOnError: true }), /katex/)
+  assert.ok(!algorithm.body?.some(block => block.kind === 'source' && block.raw.includes('\\rule')))
+  assert.ok(algorithm.body?.some(block => block.children?.some(node => node.kind === 'bold')))
 })
 
 test('标题、摘要和命题证明以正文显示且保留源码范围', () => {

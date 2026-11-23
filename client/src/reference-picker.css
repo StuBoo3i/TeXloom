@@ -21,12 +21,12 @@
 .reference-manual{display:flex;flex-direction:column;gap:6px;color:#4a6b84;font-size:calc(11px * var(--ui-font-scale));font-weight:700}
 .reference-insert-preview code{color:var(--theme-accent-strong)}
 .reference-refresh-error{color:#aa463e}
-:root[data-theme=night] .insert-dialog{background:#202d40;color:#e3edf9;border-color:#344860}
-:root[data-theme=night] .insert-dialog-head,:root[data-theme=night] .insert-dialog-actions{border-color:#344860}
-:root[data-theme=night] .reference-options button,:root[data-theme=night] .reference-categories button,:root[data-theme=night] .reference-search input,:root[data-theme=night] .reference-manual input{background:#27384e;color:#e0eafa;border-color:#45617d}
-:root[data-theme=night] .reference-options button:hover,:root[data-theme=night] .reference-options button.selected,:root[data-theme=night] .reference-categories button.active{background:var(--theme-accent-soft);border-color:var(--theme-accent-border)}
-:root[data-theme=night] .reference-badge{background:#344b68;color:#d8e9ff}
-:root[data-theme=night] .reference-option-meta,:root[data-theme=night] .reference-count,:root[data-theme=night] .reference-manual{color:#a9bdd0}
+:root:is([data-theme=night], [data-theme=miku]) .insert-dialog{background:var(--theme-surface);color:var(--theme-text);border-color:var(--theme-border)}
+:root:is([data-theme=night], [data-theme=miku]) .insert-dialog-head,:root:is([data-theme=night], [data-theme=miku]) .insert-dialog-actions{border-color:var(--theme-border)}
+:root:is([data-theme=night], [data-theme=miku]) .reference-options button,:root:is([data-theme=night], [data-theme=miku]) .reference-categories button,:root:is([data-theme=night], [data-theme=miku]) .reference-search input,:root:is([data-theme=night], [data-theme=miku]) .reference-manual input{background:var(--night-control);color:var(--theme-text);border-color:var(--night-control-border)}
+:root:is([data-theme=night], [data-theme=miku]) .reference-options button:hover,:root:is([data-theme=night], [data-theme=miku]) .reference-options button.selected,:root:is([data-theme=night], [data-theme=miku]) .reference-categories button.active{background:var(--theme-accent-soft);border-color:var(--theme-accent-border)}
+:root:is([data-theme=night], [data-theme=miku]) .reference-badge{background:var(--theme-accent-soft);color:var(--theme-accent-strong)}
+:root:is([data-theme=night], [data-theme=miku]) .reference-option-meta,:root:is([data-theme=night], [data-theme=miku]) .reference-count,:root:is([data-theme=night], [data-theme=miku]) .reference-manual{color:var(--theme-muted)}
 :root[data-theme=eye] .insert-dialog{background:#def1e1;color:#263f33;border-color:#a8cdb0}
 :root[data-theme=eye] .reference-options button,:root[data-theme=eye] .reference-categories button{background:#f1faf2;color:#335944;border-color:#b5d6bc}
 :root[data-theme=eye] .reference-options button.selected,:root[data-theme=eye] .reference-categories button.active{background:var(--theme-accent-soft);border-color:var(--theme-accent-border)}

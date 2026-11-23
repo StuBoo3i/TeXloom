@@ -5,7 +5,9 @@
   <p><strong>可视化写作 · 本地编译 · 多服务商智能助手接力</strong></p>
 </div>
 
-[在线浏览 TeXloom 产品介绍](https://stuboo3i.github.io/TeXloom/) · [查看 Visual 编辑模式](https://stuboo3i.github.io/TeXloom/#visual) · [了解多服务商 AI](https://stuboo3i.github.io/TeXloom/#ai)
+[English README](README.en.md) · [在线浏览 TeXloom 产品介绍](https://stuboo3i.github.io/TeXloom/) · [查看 Visual 编辑模式](https://stuboo3i.github.io/TeXloom/#visual) · [了解多服务商 AI](https://stuboo3i.github.io/TeXloom/#ai)
+
+工作台可以在 **设置 → 外观 → 界面语言** 中选择简体中文或 English。产品介绍页右上角也能切换语言。[浏览英文介绍](https://stuboo3i.github.io/TeXloom/?lang=en)
 
 ![TeXloom 产品首页：本地 LaTeX 工作台与源码、PDF 并排预览](docs/images/landing-hero.png)
 
@@ -261,7 +263,7 @@ npm run dev
 
 ### 外观
 
-设置面板可调整网页字体、字号及六种颜色风格，包括夜间与护眼模式。外观设置保存在本机浏览器；编辑器字号可单独调整，PDF 排版不受网页外观影响。
+设置面板可调整界面语言、网页字体、字号和配色，包括午夜墨金、青音工作室与豆沙绿护眼。语言与外观设置保存在本机浏览器，编辑器字号可单独调整。切换界面语言时可以继续编辑当前项目，LaTeX 源码和 PDF 仍按文档自身的语言和字体配置排版。
 
 ## GitHub 私有仓库协作
 

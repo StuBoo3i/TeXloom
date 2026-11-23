@@ -23,7 +23,9 @@ import { agentProviders, type AgentMode, type AgentProviderId } from './agent-cl
 import { agentProfileEnvironment, agentProfileView, newAgentProfile, readAgentConfig, writeAgentConfig, type AgentProfile } from './agent-config.js'
 import { appendAgentMessage, laneKey, normalizeAgentSession, sharedAgentContext, type AgentSession } from './agent-session.js'
 import { applySuggestedEdits, parseSuggestedEdits } from './agent-edits.js'
-import { applyAgentChanges, collectAgentChanges, createAgentWorkspace, hashBytes, readWorkspaceFile, workspaceFile, workspacePaths } from './agent-workspace.js'
+import { applyAgentChanges, collectAgentChanges, createAgentWorkspace, hashBytes, previewText, readWorkspaceFile, workspaceFile, workspacePaths } from './agent-workspace.js'
+import { agentReviewVersion, type AgentResolution } from '../shared/agent-review.js'
+import { automaticSnapshotLimit, type Snapshot } from '../shared/snapshots.js'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const defaultProjectsRoot = path.join(root, 'projects')
@@ -38,24 +40,27 @@ const app = Fastify({ logger: false, bodyLimit: 2 * 1024 * 1024 })
 type Project = { id: string; name: string; mainFile: string; createdAt: string; updatedAt: string; sharing?: 'personal' | 'shared'; archived?: boolean; tags?: string[] }
 type FileEntry = { path: string; type: 'file' | 'directory'; size?: number }
 type Job = { id: string; projectId: string; status: 'running' | 'success' | 'error'; log: string; startedAt: string; finishedAt?: string; mode?: 'full' | 'draft' }
-type Snapshot = { id: string; note: string; createdAt: string; fileCount: number }
 const jobs = new Map<string, Job>()
 const activeProjects = new Set<string>()
 const activeCardPreviews = new Set<string>()
 const reviewLocks = new Map<string, Promise<void>>()
+const snapshotLocks = new Map<string, Promise<void>>()
 const folderSelections = new Map<string, { path: string; mode: 'import' | 'export' | 'workspace'; expires: number }>()
 const activeAgentProjects = new Set<string>()
 const agentApplyingProjects = new Set<string>()
 
-async function withReviewLock<T>(id: string, action: () => Promise<T>): Promise<T> {
-  const previous = reviewLocks.get(id) ?? Promise.resolve()
+async function withProjectLock<T>(locks: Map<string, Promise<void>>, id: string, action: () => Promise<T>): Promise<T> {
+  const previous = locks.get(id) ?? Promise.resolve()
   let release!: () => void
   const current = new Promise<void>(resolve => { release = resolve })
-  reviewLocks.set(id, current)
+  locks.set(id, current)
   await previous
   try { return await action() }
-  finally { release(); if (reviewLocks.get(id) === current) reviewLocks.delete(id) }
+  finally { release(); if (locks.get(id) === current) locks.delete(id) }
 }
+
+const withReviewLock = <T>(id: string, action: () => Promise<T>) => withProjectLock(reviewLocks, id, action)
+const withSnapshotLock = <T>(id: string, action: () => Promise<T>) => withProjectLock(snapshotLocks, id, action)
 
 function fail(statusCode: number, message: string): never {
   const error = new Error(message) as Error & { statusCode: number }
@@ -417,21 +422,67 @@ async function syncReviewEvents(id: string): Promise<{ threads: number; pending:
   return materializeReviewEvents(id)
 }
 
-async function readSnapshots(id: string): Promise<Snapshot[]> {
-  try { return JSON.parse(await readFile(path.join(projectDir(id), '.openleaf', 'history', 'index.json'), 'utf8')) as Snapshot[] }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error }
+async function snapshotDirectory(id: string): Promise<string> {
+  const metadata = path.join(projectDir(id), '.openleaf')
+  const directory = path.join(metadata, 'history')
+  for (const folder of [metadata, directory]) {
+    const info = await lstat(folder).catch(error => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+      throw error
+    })
+    if (info && (!info.isDirectory() || info.isSymbolicLink())) fail(400, '快照目录无效')
+  }
+  return directory
 }
 
-async function createSnapshot(project: Project, note: string): Promise<Snapshot> {
-  const directory = path.join(projectDir(project.id), '.openleaf', 'history')
+function snapshotFile(directory: string, id: string): string {
+  if (!/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(id)) fail(400, '快照 ID 无效')
+  return path.join(directory, id + '.zip')
+}
+
+const agentSnapshotNote = 'Agent 修改应用前'
+const restoreSnapshotPrefix = '恢复前备份：'
+
+async function readSnapshots(directory: string): Promise<Snapshot[]> {
+  const bytes = await readWorkspaceFile(path.join(directory, 'index.json'))
+  if (!bytes) return []
+  const items = JSON.parse(bytes.toString('utf8')) as (Omit<Snapshot, 'kind'> & { kind?: Snapshot['kind'] })[]
+  return items.map(item => {
+    if (item.kind === 'automatic' || item.kind === 'manual') return { ...item, kind: item.kind }
+    const automatic = item.kind === undefined && (item.note === agentSnapshotNote || item.note.startsWith(restoreSnapshotPrefix))
+    return { ...item, kind: automatic ? 'automatic' : 'manual' }
+  })
+}
+
+async function saveSnapshots(directory: string, snapshots: Snapshot[], remove: Snapshot[] = []): Promise<void> {
+  const expired = remove.map(item => snapshotFile(directory, item.id))
+  const indexFile = path.join(directory, 'index.json')
+  const temporary = path.join(directory, 'index-' + randomUUID() + '.tmp')
+  try {
+    await writeFile(temporary, JSON.stringify(snapshots, null, 2), { encoding: 'utf8', flag: 'wx' })
+    await rename(temporary, indexFile)
+  } finally { await rm(temporary, { force: true }).catch(() => {}) }
+  for (const file of expired) await rm(file, { force: true })
+}
+
+async function enforceSnapshotLimit(directory: string, snapshots: Snapshot[], save = false): Promise<Snapshot[]> {
+  const expired = snapshots.filter(item => item.kind === 'automatic').slice(automaticSnapshotLimit)
+  if (!save && !expired.length) return snapshots
+  const expiredIds = new Set(expired.map(item => item.id))
+  const retained = snapshots.filter(item => !expiredIds.has(item.id))
+  await saveSnapshots(directory, retained, expired)
+  return retained
+}
+
+async function createSnapshot(project: Project, directory: string, note: string, kind: Snapshot['kind']): Promise<Snapshot> {
   await mkdir(directory, { recursive: true })
+  const previous = await readSnapshots(directory)
   const files = (await listProjectFiles(project.id)).filter(item => item.type === 'file')
   const archive = new AdmZip()
   for (const file of files) archive.addLocalFile(await safeFile(project.id, file.path), path.posix.dirname(file.path) === '.' ? '' : path.posix.dirname(file.path))
-  const snapshot: Snapshot = { id: randomUUID(), note: note.trim().slice(0, 120) || '手动快照', createdAt: new Date().toISOString(), fileCount: files.length }
-  archive.writeZip(path.join(directory, `${snapshot.id}.zip`))
-  const index = [snapshot, ...await readSnapshots(project.id)]
-  await writeFile(path.join(directory, 'index.json'), JSON.stringify(index, null, 2), 'utf8')
+  const snapshot: Snapshot = { id: randomUUID(), note: note.trim().slice(0, 120) || '手动快照', createdAt: new Date().toISOString(), fileCount: files.length, kind }
+  archive.writeZip(snapshotFile(directory, snapshot.id))
+  await enforceSnapshotLimit(directory, [snapshot, ...previous], true)
   return snapshot
 }
 
@@ -633,7 +684,7 @@ app.setErrorHandler((error, _request, reply) => {
   reply.code(status).send({ error: status === 500 ? '服务器内部错误' : err.message })
 })
 
-app.get('/api/health', async () => ({ ok: true, tectonic: existsSync(tectonicPath), version: '0.1.0' }))
+app.get('/api/health', async () => ({ ok: true, tectonic: existsSync(tectonicPath), version: '0.1.0', agentReviewVersion }))
 
 app.get<{ Querystring: { projectId?: string } }>('/api/workspace', async request => ({
   root: projectsRoot,
@@ -1230,36 +1281,57 @@ app.patch<{ Params: { id: string; threadId: string }; Body: { action: 'reply' | 
 })
 
 app.get<{ Params: { id: string } }>('/api/projects/:id/history', async request => {
-  await getProject(request.params.id)
-  return readSnapshots(request.params.id)
+  const { id } = await getProject(request.params.id)
+  return withSnapshotLock(id, async () => {
+    const directory = await snapshotDirectory(id)
+    return enforceSnapshotLimit(directory, await readSnapshots(directory))
+  })
 })
 app.post<{ Params: { id: string }; Body: { note?: string } }>('/api/projects/:id/history', async request => {
   const project = await getProject(request.params.id)
-  return createSnapshot(project, request.body?.note ?? '')
+  const note = request.body?.note ?? ''
+  if (typeof note !== 'string') fail(400, '快照说明必须是文字')
+  return withSnapshotLock(project.id, async () => createSnapshot(project, await snapshotDirectory(project.id), note, 'manual'))
+})
+app.delete<{ Params: { id: string; snapshotId: string } }>('/api/projects/:id/history/:snapshotId', async request => {
+  const { id } = await getProject(request.params.id)
+  return withSnapshotLock(id, async () => {
+    const directory = await snapshotDirectory(id)
+    const snapshots = await readSnapshots(directory)
+    const item = snapshots.find(snapshot => snapshot.id === request.params.snapshotId)
+    if (!item) fail(404, '快照不存在')
+    await saveSnapshots(directory, snapshots.filter(snapshot => snapshot.id !== item.id), [item])
+    return { ok: true }
+  })
 })
 app.post<{ Params: { id: string; snapshotId: string } }>('/api/projects/:id/history/:snapshotId/restore', async request => {
   const project = await getProject(request.params.id)
-  const item = (await readSnapshots(project.id)).find(snapshot => snapshot.id === request.params.snapshotId)
-  if (!item) fail(404, '快照不存在')
-  const file = path.join(projectDir(project.id), '.openleaf', 'history', `${item.id}.zip`)
-  if (!existsSync(file)) fail(404, '快照文件不存在')
-  await createSnapshot(project, `恢复前备份：${item.note}`)
-  const archive = new AdmZip(file)
-  const contents = new Map<string, Buffer>()
-  for (const entry of archive.getEntries()) {
-    if (entry.isDirectory) continue
-    const relative = safeRelative(entry.entryName)
-    contents.set(relative, entry.getData())
-  }
-  const current = (await listProjectFiles(project.id)).filter(entry => entry.type === 'file')
-  for (const entry of current) if (!contents.has(entry.path)) await rm(await safeFile(project.id, entry.path), { force: true })
-  for (const [relative, bytes] of contents) {
-    const target = await safeFile(project.id, relative)
-    await mkdir(path.dirname(target), { recursive: true })
-    await writeFile(target, bytes)
-  }
-  await saveProject(project)
-  return { ok: true, restored: item.id }
+  return withSnapshotLock(project.id, async () => {
+    const directory = await snapshotDirectory(project.id)
+    const snapshots = await readSnapshots(directory)
+    const item = snapshots.find(snapshot => snapshot.id === request.params.snapshotId)
+    if (!item) fail(404, '快照不存在')
+    const bytes = await readWorkspaceFile(snapshotFile(directory, item.id))
+    if (!bytes) fail(404, '快照文件不存在')
+    // The backup may prune the snapshot being restored, so load it first.
+    const archive = new AdmZip(bytes)
+    const contents = new Map<string, Buffer>()
+    for (const entry of archive.getEntries()) {
+      if (entry.isDirectory) continue
+      const relative = safeRelative(entry.entryName)
+      contents.set(relative, entry.getData())
+    }
+    await createSnapshot(project, directory, restoreSnapshotPrefix + item.note, 'automatic')
+    const current = (await listProjectFiles(project.id)).filter(entry => entry.type === 'file')
+    for (const entry of current) if (!contents.has(entry.path)) await rm(await safeFile(project.id, entry.path), { force: true })
+    for (const [relative, content] of contents) {
+      const target = await safeFile(project.id, relative)
+      await mkdir(path.dirname(target), { recursive: true })
+      await writeFile(target, content)
+    }
+    await saveProject(project)
+    return { ok: true, restored: item.id }
+  })
 })
 
 app.get<{ Params: { id: string } }>('/api/projects/:id/git', async request => {
@@ -1785,15 +1857,24 @@ app.get<{ Params: { id: string } }>('/api/projects/:id/agent/review', async requ
   await getProject(request.params.id)
   const session = await readAgentSession(request.params.id)
   await refreshAgentDraft(request.params.id, session)
-  return { changes: await Promise.all(session.pending.map(async change => {
+  return { agentReviewVersion, changes: await Promise.all(session.pending.map(async change => {
     const current = await readWorkspaceFile(await safeFile(request.params.id, change.path))
-    const conflict = (current ? hashBytes(current) : undefined) !== change.beforeHash
-    const currentText = current && !current.includes(0) && current.length <= 200 * 1024 ? current.toString('utf8') : undefined
-    return { ...change, conflict, ...(conflict ? { current: currentText, currentSize: current?.length ?? 0 } : {}) }
+    const currentHash = current ? hashBytes(current) : null
+    const conflict = currentHash !== (change.beforeHash ?? null)
+    if (!conflict) return { ...change, conflict, currentHash }
+    const currentText = current && current.length <= 200 * 1024 ? previewText(current) : undefined
+    return {
+      ...change, conflict, currentHash, current: currentText, currentSize: current?.length ?? 0,
+      binary: change.binary || (current !== undefined && (current.includes(0) || (current.length <= 200 * 1024 && currentText === undefined))),
+    }
   })) }
 })
 
-app.get<{ Params: { id: string }; Querystring: { path: string; side: 'before' | 'after' | 'current' } }>('/api/projects/:id/agent/preview', async request => {
+function verifyAgentPreview(bytes: Buffer | undefined, expected?: string) {
+  if (expected !== undefined && (bytes ? hashBytes(bytes) : 'missing') !== expected) fail(409, '审阅版本已变化，请刷新差异后重试')
+}
+
+app.get<{ Params: { id: string }; Querystring: { path: string; side: 'before' | 'after' | 'current'; hash?: string } }>('/api/projects/:id/agent/preview', async request => {
   agentAccess(request)
   await getProject(request.params.id)
   const session = await readAgentSession(request.params.id)
@@ -1801,6 +1882,7 @@ app.get<{ Params: { id: string }; Querystring: { path: string; side: 'before' | 
   const { base, work } = workspacePaths(agentStage(request.params.id))
   const file = request.query.side === 'current' ? await safeFile(request.params.id, request.query.path) : workspaceFile(request.query.side === 'before' ? base : work, request.query.path)
   const bytes = await readWorkspaceFile(file)
+  verifyAgentPreview(bytes, request.query.hash)
   if (!bytes) return { content: '' }
   if (bytes.length > 2 * 1024 * 1024) fail(413, '文件超过文本对照上限（2 MB）')
   if (bytes.includes(0)) fail(415, '此文件是二进制文件')
@@ -1808,7 +1890,7 @@ app.get<{ Params: { id: string }; Querystring: { path: string; side: 'before' | 
   return { content }
 })
 
-app.get<{ Params: { id: string }; Querystring: { path: string; side: 'before' | 'after' | 'current' } }>('/api/projects/:id/agent/asset', async (request, reply) => {
+app.get<{ Params: { id: string }; Querystring: { path: string; side: 'before' | 'after' | 'current'; hash?: string } }>('/api/projects/:id/agent/asset', async (request, reply) => {
   agentAccess(request)
   await getProject(request.params.id)
   const session = await readAgentSession(request.params.id)
@@ -1820,12 +1902,13 @@ app.get<{ Params: { id: string }; Querystring: { path: string; side: 'before' | 
   const { base, work } = workspacePaths(agentStage(request.params.id))
   const file = request.query.side === 'current' ? await safeFile(request.params.id, change.path) : workspaceFile(request.query.side === 'before' ? base : work, change.path)
   const bytes = await readWorkspaceFile(file)
+  verifyAgentPreview(bytes, request.query.hash)
   if (!bytes) fail(404, '草稿图片不存在')
   if (bytes.length > 20 * 1024 * 1024) fail(413, '草稿图片过大')
   return reply.header('Cache-Control', 'no-store').header('X-Content-Type-Options', 'nosniff').type(type).send(bytes)
 })
 
-app.post<{ Params: { id: string }; Body: { paths?: string[]; hunks?: Record<string, number[]> } }>('/api/projects/:id/agent/apply', async request => {
+app.post<{ Params: { id: string }; Body: { paths?: string[]; hunks?: Record<string, number[]>; resolutions?: Record<string, AgentResolution> } }>('/api/projects/:id/agent/apply', async request => {
   agentAccess(request)
   const project = await getProject(request.params.id)
   if (activeAgentProjects.has(project.id) || agentApplyingProjects.has(project.id)) fail(409, 'Agent 仍在运行或应用修改')
@@ -1837,19 +1920,31 @@ app.post<{ Params: { id: string }; Body: { paths?: string[]; hunks?: Record<stri
   const selected = session.pending.filter(change => requested.includes(change.path))
   const hunks = request.body?.hunks ?? {}
   if (!hunks || typeof hunks !== 'object' || Array.isArray(hunks) || Object.keys(hunks).some(file => !requested.includes(file))) fail(400, '采纳片段无效')
+  const resolutions = request.body?.resolutions ?? {}
+  const validHash = (value: unknown) => value === null || (typeof value === 'string' && /^[a-f0-9]{64}$/.test(value))
+  if (typeof resolutions !== 'object' || Array.isArray(resolutions) || Object.entries(resolutions).some(([file, resolution]) =>
+    !requested.includes(file) || Object.hasOwn(hunks, file) || !resolution || typeof resolution !== 'object' ||
+    !['current', 'draft'].includes(resolution.choice) || ![resolution.currentHash, resolution.beforeHash, resolution.afterHash].every(validHash)
+  )) fail(400, '请选择有效的冲突版本')
   const { base, work } = workspacePaths(agentStage(project.id))
+  if (activeAgentProjects.has(project.id) || agentApplyingProjects.has(project.id)) fail(409, 'Agent 仍在运行或应用修改')
   agentApplyingProjects.add(project.id)
   try {
-    const applied = await applyAgentChanges(selected, base, work, relative => safeFile(project.id, relative), async () => { await createSnapshot(project, 'Agent 修改应用前') }, hunks)
+    const applied = await applyAgentChanges(selected, base, work, relative => safeFile(project.id, relative), async () => {
+      await withSnapshotLock(project.id, async () => createSnapshot(project, await snapshotDirectory(project.id), agentSnapshotNote, 'automatic'))
+    }, hunks, resolutions)
+    const kept = selected.filter(change => !applied.includes(change.path)).map(change => change.path)
     const owner = session.pendingLane ? session.lanes[session.pendingLane] : undefined
     session.pending = await collectAgentChanges(base, work)
     if (!session.pending.length) session.pendingLane = undefined
-    if (owner) appendAgentMessage(session, { role: 'system', text: `已应用修改：${applied.join('、')}`, at: new Date().toISOString(), provider: owner.provider, profileId: owner.profileId })
+    const actions = [...(applied.length ? ['已应用 Agent 修改：' + applied.join('、')] : []), ...(kept.length ? ['已保留当前版本：' + kept.join('、')] : [])]
+    if (owner) appendAgentMessage(session, { role: 'system', text: actions.join('\n'), at: new Date().toISOString(), provider: owner.provider, profileId: owner.profileId })
     session.updatedAt = new Date().toISOString()
     await writeAgentSession(project.id, session)
     await saveProject(project)
     if (!session.pending.length) await rm(agentStage(project.id), { recursive: true, force: true })
-    return { applied, remaining: session.pending.length }
+    const resolved = selected.filter(change => Object.hasOwn(resolutions, change.path)).map(change => change.path)
+    return { applied, kept, resolved, remaining: session.pending.length }
   } finally { agentApplyingProjects.delete(project.id) }
 })
 app.post<{ Params: { id: string } }>('/api/projects/:id/agent/discard', async request => {

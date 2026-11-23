@@ -3,13 +3,14 @@ export type InlineNode = SourceSpan & {
   kind: 'text' | 'bold' | 'italic' | 'highlight' | 'math' | 'link' | 'reference' | 'citation' | 'source'
   raw: string
   value?: SourceSpan
+  display?: boolean
   label?: SourceSpan
   target?: SourceSpan
   children?: InlineNode[]
   name?: string
 }
 export type VisualBlock = SourceSpan & {
-  kind: 'paragraph' | 'heading' | 'list' | 'math' | 'source' | 'title' | 'abstract' | 'theorem' | 'highlight' | 'figure' | 'table' | 'blank'
+  kind: 'paragraph' | 'heading' | 'list' | 'math' | 'source' | 'title' | 'abstract' | 'theorem' | 'algorithm' | 'highlight' | 'figure' | 'table' | 'blank'
   raw: string
   level?: number
   title?: SourceSpan
@@ -40,21 +41,40 @@ export function replaceSourceSpan(source: string, span: SourceSpan, expected: st
   return source.slice(0, span.start) + replacement + source.slice(span.end)
 }
 
+export function adjacentBlank(blocks: VisualBlock[], source: string, offset: number, direction: 'before' | 'after'): VisualBlock | undefined {
+  return direction === 'before'
+    ? [...blocks].reverse().find(block => block.kind === 'blank' && block.end <= offset && /^[ \t]*$/.test(source.slice(block.end, offset)))
+    : blocks.find(block => block.kind === 'blank' && block.start === offset)
+}
+
+const textEscapes: Record<string, string> = {
+  '\\': '\\textbackslash{}', '{': '\\{', '}': '\\}', '%': '\\%', '$': '\\$', '&': '\\&',
+  '#': '\\#', '_': '\\_', '~': '\\textasciitilde{}', '^': '\\textasciicircum{}', '\u00a0': '~',
+}
+const decodedEscapes = Object.fromEntries(Object.entries(textEscapes).map(([character, token]) => [token, character]))
+const textEscapePattern = /\\(?:text(?:backslash|asciitilde|asciicircum)\{\}|[%$&#_{}])|~/g
+
+function textEscapeLength(raw: string, offset: number): number {
+  if (raw[offset] !== '\\') return 0
+  if (/[%$&#_{}]/.test(raw[offset + 1] ?? '')) return 2
+  if (raw[offset + 1] !== 't') return 0
+  return ['\\textbackslash{}', '\\textasciitilde{}', '\\textasciicircum{}'].find(token => raw.startsWith(token, offset))?.length ?? 0
+}
+
 export function decodeText(raw: string): string {
-  return raw.replace(/\\([%$&#_{}])/g, '$1').replace(/~/g, '\u00a0')
+  return raw.replace(textEscapePattern, token => decodedEscapes[token] ?? token)
 }
 
 export function encodeText(value: string): string {
-  return value.replace(/\\/g, '\\textbackslash{}').replace(/[{}%$&#_~^\u00a0]/g, character => ({
-    '{': '\\{', '}': '\\}', '%': '\\%', '$': '\\$', '&': '\\&', '#': '\\#', '_': '\\_', '~': '\\textasciitilde{}', '^': '\\textasciicircum{}', '\u00a0': '~',
-  })[character] ?? character)
+  return value.replace(/[\\{}%$&#_~^\u00a0]/g, character => textEscapes[character])
 }
 
 export function sourceOffsetForVisible(raw: string, visibleOffset: number): number {
   let visible = 0
   for (let offset = 0; offset < raw.length; offset++) {
     if (visible >= visibleOffset) return offset
-    if (raw[offset] === '\\' && /[%$&#_{}]/.test(raw[offset + 1] ?? '')) offset++
+    const escaped = textEscapeLength(raw, offset)
+    if (escaped) offset += escaped - 1
     else if (raw[offset] === '\r' && raw[offset + 1] === '\n') offset++
     visible++
   }
@@ -64,7 +84,8 @@ export function sourceOffsetForVisible(raw: string, visibleOffset: number): numb
 export function visibleOffsetForSource(raw: string, sourceOffset: number): number {
   let visible = 0
   for (let offset = 0; offset < Math.min(sourceOffset, raw.length); offset++) {
-    if (raw[offset] === '\\' && /[%$&#_{}]/.test(raw[offset + 1] ?? '')) offset++
+    const escaped = textEscapeLength(raw, offset)
+    if (escaped) offset += escaped - 1
     else if (raw[offset] === '\r' && raw[offset + 1] === '\n') offset++
     visible++
   }
@@ -100,27 +121,43 @@ function commandEnd(source: string, start: number, limit: number): number {
   return end
 }
 
+// These commands change page or float placement but have no visible content to edit.
+const nonVisualDirective = /^\\(?:clearpage|cleardoublepage|newpage|pagebreak(?:\[[^\]]*\])?|nopagebreak(?:\[[^\]]*\])?|FloatBarrier)(?![A-Za-z@])/
+
 function inline(source: string, start: number, end: number): InlineNode[] {
   const result: InlineNode[] = []
   let textStart = start
   const flush = (at: number) => { if (at > textStart) result.push({ kind: 'text', start: textStart, end: at, raw: source.slice(textStart, at) }) }
   for (let i = start; i < end;) {
     if (source[i] === '%' && source[i - 1] !== '\\') { flush(i); const lineEnd = source.indexOf('\n', i); i = textStart = lineEnd < 0 || lineEnd >= end ? end : lineEnd + 1; continue }
-    const delimiter = source.startsWith('\\(', i) ? '\\(' : source[i] === '$' && source[i - 1] !== '\\' ? '$' : ''
+    if (source[i] === '{' && /^\{\\(?:heiti|bfseries)\s+/.test(source.slice(i, Math.min(end, i + 30)))) {
+      const value = group(source, i)
+      if (value && value.end < end) {
+        const innerStart = i + source.slice(i, value.end).match(/^\{\\(?:heiti|bfseries)\s+/)![0].length
+        flush(i)
+        result.push({ kind: 'bold', start: i, end: value.end + 1, raw: source.slice(i, value.end + 1), children: inline(source, innerStart, value.end) })
+        i = textStart = value.end + 1
+        continue
+      }
+    }
+    const delimiter = source.startsWith('\\[', i) ? '\\[' : source.startsWith('\\(', i) ? '\\(' : source.startsWith('$$', i) ? '$$' : source[i] === '$' && source[i - 1] !== '\\' ? '$' : ''
     if (delimiter) {
-      const close = delimiter === '$' ? '$' : '\\)'
+      const close = delimiter === '\\[' ? '\\]' : delimiter === '\\(' ? '\\)' : delimiter
       const found = source.indexOf(close, i + delimiter.length)
       if (found >= 0 && found < end) {
         flush(i)
         const value = { start: i + delimiter.length, end: found }
         const next = found + close.length
-        result.push({ kind: 'math', start: i, end: next, value, raw: source.slice(i, next) })
+        result.push({ kind: 'math', start: i, end: next, value, display: delimiter === '\\[' || delimiter === '$$', raw: source.slice(i, next) })
         i = textStart = next
         continue
       }
     }
     if (source[i] !== '\\') { i++; continue }
-    if (i + 1 < end && /[%$&#_{}]/.test(source[i + 1])) { i += 2; continue }
+    const escaped = textEscapeLength(source, i)
+    if (escaped && i + escaped <= end) { i += escaped; continue }
+    const invisible = source.slice(i, end).match(nonVisualDirective)
+    if (invisible) { flush(i); i = textStart = i + invisible[0].length; continue }
     const name = source.slice(i, end).match(/^\\([A-Za-z@]+\*?)/)?.[1]
     if (!name) {
       if (source[i + 1] === '\\') { flush(i); const next = i + 2; result.push({ kind: 'source', start: i, end: next, raw: source.slice(i, next) }); i = textStart = next; continue }
@@ -312,6 +349,9 @@ function parseBlocks(source: string, bodyStart: number, bodyEnd: number, title?:
       const value = group(source, i + standaloneLabel[0].length - 1)
       if (value && value.end < bodyEnd) { i = value.end + 1; continue }
     }
+    const leadingSpace = rest.match(/^[ \t]*/)?.[0].length ?? 0
+    const invisible = rest.slice(leadingSpace).match(nonVisualDirective)
+    if (invisible) { i += leadingSpace + invisible[0].length; continue }
     const fontSwitch = rest.match(/^[ \t]*\\(?:kaishu|itshape|bfseries|normalfont|noindent)(?=\s|\\|$)/)
     if (fontSwitch && !/^\s*\\noindent\s*\\colorbox/.test(rest)) { i += fontSwitch[0].length; continue }
     const makeTitle = rest.match(/^[ \t]*\\maketitle\b/)
@@ -346,6 +386,26 @@ function parseBlocks(source: string, bodyStart: number, bodyEnd: number, title?:
         blocks.push({ kind: structured[1] === 'abstract' ? 'abstract' : 'theorem', name: structured[1] === 'abstract' ? '摘要' : structured[1], start: i, end, raw: source.slice(i, end), labels: attached.labels, body: parseBlocks(source, attached.end, closeAt), summary: structured[2] })
         i = end
         continue
+      }
+    }
+    const quote = rest.match(/^[ \t]*\\begin\{quote\}/)
+    if (quote) {
+      const closeAt = environmentClose(source, i + quote[0].length, 'quote', bodyEnd)
+      if (closeAt >= 0) {
+        const end = closeAt + '\\end{quote}'.length
+        const inner = source.slice(i + quote[0].length, closeAt)
+        const title = /\\noindent\s*\{\\heiti\s+算法[：:]([^{}]+)\}\s*\\par\\nobreak/.exec(inner.slice(0, 500))
+        if (title && title.index < 300) {
+          const contentStart = i + quote[0].length + title.index + title[0].length
+          let contentEnd = closeAt
+          const minipageEnd = source.slice(contentStart, contentEnd).match(/\s*\\end\{minipage\}\s*$/)
+          if (minipageEnd) contentEnd -= minipageEnd[0].length
+          const trailing = source.slice(contentStart, contentEnd).match(/\s*(?:\\par\s*)?\\noindent\\rule\{\\linewidth\}\{[^{}]+\}\s*$/)
+          if (trailing) contentEnd -= trailing[0].length
+          blocks.push({ kind: 'algorithm', name: title[1].trim(), start: i, end, raw: source.slice(i, end), body: parseBlocks(source, contentStart, contentEnd) })
+          i = end
+          continue
+        }
       }
     }
     const heading = rest.match(/^[ \t]*\\(part|chapter|section|subsection|subsubsection|paragraph|subparagraph)\*?(?:\[[^\]]*\])?\{/)
@@ -414,7 +474,7 @@ function parseBlocks(source: string, bodyStart: number, bodyEnd: number, title?:
         continue
       }
     }
-    if (/^[ \t]*%/.test(rest) || /^[ \t]*\\(?!textbf\b|textit\b|emph\b|colorbox\b|href\b|url\b|ref\b|eqref\b|cite\b)/.test(rest)) {
+    if (/^[ \t]*%/.test(rest) || /^[ \t]*\\(?!(?:textbf|textit|emph|colorbox|href|url|ref|eqref|autoref|pageref|cref|Cref|cite|citep|citet|autocite|parencite)\b|text(?:backslash|asciitilde|asciicircum)\{\}|[%$&#_{}])/.test(rest)) {
       const environment = rest.match(/^[ \t]*\\begin\{([^}]+)\}/)
       let end = source.indexOf('\n', i)
       end = end < 0 || end > bodyEnd ? bodyEnd : end
@@ -433,7 +493,7 @@ function parseBlocks(source: string, bodyStart: number, bodyEnd: number, title?:
       const next = lineEnd < 0 || lineEnd >= bodyEnd ? bodyEnd : lineEnd + 1
       end = next
       if (end >= bodyEnd || /^\s*$/.test(source.slice(end, source.indexOf('\n', end) < 0 ? bodyEnd : source.indexOf('\n', end)))) break
-      if (/^[ \t]*\\(?:begin|end|section|subsection|subsubsection|chapter|part|paragraph|subparagraph|\[|maketitle|noindent\s*\\colorbox)|^[ \t]*\$\$|^[ \t]*%/.test(source.slice(end, Math.min(bodyEnd, end + 160)))) break
+      if (/^[ \t]*\\(?:begin|end|section|subsection|subsubsection|chapter|part|paragraph|subparagraph|\[|maketitle|clearpage|cleardoublepage|newpage|pagebreak|nopagebreak|FloatBarrier|noindent\s*\\colorbox)|^[ \t]*\$\$|^[ \t]*%/.test(source.slice(end, Math.min(bodyEnd, end + 160)))) break
     }
     if (end <= i) end = Math.min(i + 1, bodyEnd)
     blocks.push({ kind: 'paragraph', start: i, end, raw: source.slice(i, end), children: inline(source, i, end) })

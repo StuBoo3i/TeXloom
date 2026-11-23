@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promi
 import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
-import { applyAgentChanges, collectAgentChanges, createAgentWorkspace, workspaceFile, workspacePaths } from '../server/agent-workspace.js'
+import { applyAgentChanges, collectAgentChanges, createAgentWorkspace, hashBytes, workspaceFile, workspacePaths } from '../server/agent-workspace.js'
 import { applyLineHunks, lineHunks } from '../shared/agent-hunks.js'
 
 test('文本差异可按独立片段采纳，保留未采纳片段', () => {
@@ -80,4 +80,42 @@ test('按段采纳后，剩余片段仍留在同一份草稿中', async () => {
     assert.equal(remaining[0].before, 'A\nkeep\nb\n')
     assert.equal(remaining[0].after, 'A\nkeep\nB\n')
   } finally { assert.equal(path.relative(os.tmpdir(), root).startsWith('..'), false); await rm(root, { recursive: true, force: true }) }
+})
+
+test('一次解决多个冲突，三个位置逐字节采用各自选中的版本', async () => {
+  const parent = await realpath(os.tmpdir())
+  const root = await mkdtemp(path.join(parent, 'texloom-agent-unify-'))
+  try {
+    const project = path.join(root, 'project')
+    const { base, work } = workspacePaths(path.join(root, 'draft'))
+    for (const folder of [project, base, work]) await mkdir(folder, { recursive: true })
+    const names = ['keep.tex', 'draft.tex', 'delete.tex']
+    for (const name of names) {
+      await writeFile(path.join(base, name), 'base\n')
+      await writeFile(path.join(project, name), 'current ' + name + '\n')
+      if (name !== 'delete.tex') await writeFile(path.join(work, name), 'agent ' + name + '\n')
+    }
+    await writeFile(path.join(work, 'pending.bib'), 'later')
+    const changes = (await collectAgentChanges(base, work)).filter(change => names.includes(change.path))
+    const original = await Promise.all(names.map(name => readFile(path.join(project, name))))
+    const resolutions = Object.fromEntries(changes.map(change => [change.path, {
+      choice: change.path === 'keep.tex' ? 'current' as const : 'draft' as const,
+      currentHash: hashBytes(original[names.indexOf(change.path)]),
+      beforeHash: change.beforeHash ?? null,
+      afterHash: change.afterHash ?? null,
+    }]))
+    const applied = await applyAgentChanges(changes, base, work, async relative => workspaceFile(project, relative), async () => {
+      assert.deepEqual(await readFile(path.join(project, 'draft.tex')), original[1])
+    }, {}, resolutions)
+    assert.deepEqual(applied.sort(), ['delete.tex', 'draft.tex'])
+    for (const folder of [project, base, work]) {
+      assert.deepEqual(await readFile(path.join(folder, 'keep.tex')), original[0])
+      assert.equal(await readFile(path.join(folder, 'draft.tex'), 'utf8'), 'agent draft.tex\n')
+      await assert.rejects(readFile(path.join(folder, 'delete.tex')), { code: 'ENOENT' })
+    }
+    assert.deepEqual((await collectAgentChanges(base, work)).map(change => change.path), ['pending.bib'])
+  } finally {
+    assert.equal(path.dirname(await realpath(root)), parent)
+    await rm(root, { recursive: true, force: true })
+  }
 })

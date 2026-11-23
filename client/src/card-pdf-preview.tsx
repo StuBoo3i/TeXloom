@@ -1,3 +1,4 @@
+import { t } from './i18n'
 import { useEffect, useRef, useState } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
 import { ChevronLeft, ChevronRight, Download, ExternalLink } from 'lucide-react'
@@ -17,7 +18,7 @@ export function CardPdfPreview({ url }: { url: string }) {
     setPdf(null); setPage(1); setReady(false); setError('')
     const task = pdfjsLib.getDocument({ url, withCredentials: false })
     void task.promise.then(document => { if (!cancelled) setPdf(document) }).catch(cause => {
-      if (!cancelled) setError(cause instanceof Error ? cause.message : 'PDF 加载失败')
+      if (!cancelled) setError(cause instanceof Error ? cause.message : t("PDF 加载失败"))
     })
     return () => { cancelled = true; void task.destroy() }
   }, [url])
@@ -39,7 +40,7 @@ export function CardPdfPreview({ url }: { url: string }) {
           const sheet = document.createElement('canvas')
           sheet.width = Math.ceil(viewport.width); sheet.height = Math.ceil(viewport.height)
           const context = sheet.getContext('2d', { alpha: false })
-          if (!context) throw new Error('无法创建 PDF 画布')
+          if (!context) throw new Error(t("无法创建 PDF 画布"))
           context.fillStyle = '#fff'; context.fillRect(0, 0, sheet.width, sheet.height)
           renderTask = pdfPage.render({ canvas: sheet, canvasContext: context, viewport, background: '#ffffff' })
           await renderTask.promise
@@ -63,7 +64,7 @@ export function CardPdfPreview({ url }: { url: string }) {
         output.getContext('2d')?.drawImage(rendered.sheet, bounds.x, bounds.y, bounds.width, bounds.height, 0, 0, bounds.width, bounds.height)
         setReady(true)
       } catch (cause) {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : 'PDF 渲染失败')
+        if (!cancelled) setError(cause instanceof Error ? cause.message : t("PDF 渲染失败"))
       }
     })()
     return () => { cancelled = true; renderTask?.cancel() }
@@ -71,16 +72,16 @@ export function CardPdfPreview({ url }: { url: string }) {
 
   return <div className="card-pdf" ref={stage}>
     <div className="card-pdf-toolbar">
-      <span>编译预览 · 已裁去页面留白</span>
+      <span>{t("编译预览 · 已裁去页面留白")}</span>
       <div className="card-pdf-controls">
-        {pdf && pdf.numPages > 1 && <><button type="button" aria-label="上一页" disabled={page <= 1} onClick={() => setPage(value => value - 1)}><ChevronLeft size={14} /></button><small>{page} / {pdf.numPages}</small><button type="button" aria-label="下一页" disabled={page >= pdf.numPages} onClick={() => setPage(value => value + 1)}><ChevronRight size={14} /></button></>}
-        <a href={url} target="_blank" rel="noopener noreferrer" title="打开完整 PDF"><ExternalLink size={14} />完整 PDF</a>
-        <a href={url} download="card-preview.pdf" title="下载 PDF"><Download size={14} /></a>
+        {pdf && pdf.numPages > 1 && <><button type="button" aria-label={t("上一页")} disabled={page <= 1} onClick={() => setPage(value => value - 1)}><ChevronLeft size={14} /></button><small>{page} / {pdf.numPages}</small><button type="button" aria-label={t("下一页")} disabled={page >= pdf.numPages} onClick={() => setPage(value => value + 1)}><ChevronRight size={14} /></button></>}
+        <a href={url} target="_blank" rel="noopener noreferrer" title={t("打开完整 PDF")}><ExternalLink size={14} />{t("完整 PDF")}</a>
+        <a href={url} download="card-preview.pdf" title={t("下载 PDF")}><Download size={14} /></a>
       </div>
     </div>
     <div className="card-pdf-stage">
-      {!ready && <div className="card-pdf-message" role={error ? 'alert' : 'status'}>{error || '正在排版预览…'}</div>}
-      <canvas ref={canvas} aria-label="裁切后的卡片编译结果" style={{ display: ready ? 'block' : 'none' }} />
+      {!ready && <div className="card-pdf-message" role={error ? 'alert' : 'status'}>{error || t("正在排版预览…")}</div>}
+      <canvas ref={canvas} aria-label={t("裁切后的卡片编译结果")} style={{ display: ready ? 'block' : 'none' }} />
     </div>
   </div>
 }

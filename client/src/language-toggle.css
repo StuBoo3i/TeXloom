@@ -1,0 +1,13 @@
+.language-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  padding: 5px 8px;
+  border: 1px solid var(--theme-accent-border, #b9cddd);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--theme-accent-strong, #194f76);
+  font: 700 12px/1.4 var(--ui-font-family, system-ui, sans-serif);
+}
+.language-toggle:hover { background: var(--theme-accent-soft, #e8f1f6); }

@@ -1,3 +1,4 @@
+import { t } from './i18n'
 import type * as Monaco from 'monaco-editor'
 import { latexLanguageId } from './latex-language'
 
@@ -84,7 +85,7 @@ export function registerLatexCompletion(monaco: typeof Monaco, getContext: () =>
         insertTextRules: item.snippet ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet : undefined,
         range: { startLineNumber: position.lineNumber, endLineNumber: position.lineNumber, startColumn: position.column - (offset - item.replaceFrom), endColumn: position.column },
         kind: item.kind === 'environment' ? kinds.Module : item.kind === 'symbol' ? kinds.Color : item.kind === 'reference' ? kinds.Reference : item.kind === 'file' ? kinds.File : item.kind === 'package' ? kinds.Module : kinds.Function,
-        detail: item.detail,
+        detail: t(item.detail),
       })) }
     },
   })

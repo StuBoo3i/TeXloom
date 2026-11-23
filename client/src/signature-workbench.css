@@ -1,0 +1,308 @@
+:root[data-theme=night] {
+  --signature-topbar: linear-gradient(108deg, #24212f, #191923 42%, #171822);
+  --signature-panel: var(--night-panel);
+  --signature-control: var(--night-control);
+  --signature-control-border: var(--night-control-border);
+  --signature-hover: var(--night-hover);
+  --signature-stage: var(--theme-page);
+  --signature-stage-glow: #2b2534;
+  --signature-page-wash: #39304438;
+  --signature-title-line: #a98354;
+  --signature-button-sheen: linear-gradient(155deg, #fae0aa66, #c88b2e15 75%);
+  --signature-button-shadow: inset 0 1px #fff0c055, 0 2px 8px #08081055;
+}
+
+:root[data-theme=vermilion] {
+  color-scheme: light;
+  --theme-page: #f4ebe2;
+  --theme-surface: #fff8ef;
+  --theme-text: #342620;
+  --theme-muted: #705950;
+  --theme-border: #e2cec0;
+  --theme-accent: #9e342d;
+  --theme-accent-strong: #792821;
+  --theme-accent-soft: #f4dfd6;
+  --theme-accent-border: #bc8278;
+  --theme-hero: #f1ded0;
+  --signature-topbar: linear-gradient(110deg, #f3dacf, #fff7ea 58%);
+  --signature-panel: #f7ece2;
+  --signature-control: #fff8f0;
+  --signature-control-border: #d6b7a4;
+  --signature-hover: #f1e1d7;
+  --signature-stage: #eadecf;
+  --signature-stage-glow: #f8ecdc;
+  --signature-page: #fffbf4;
+  --signature-page-wash: #ecd1ba35;
+  --signature-title-line: #a23e32;
+  --signature-button-sheen: linear-gradient(150deg, #ffffff16, #50160f26);
+  --signature-button-shadow: 0 2px 7px #84372d35;
+  --signature-scroll: #b99988;
+  --signature-ready-ink: #315e4d;
+  --signature-ready-surface: #e8eee3;
+  --signature-ready-border: #c4d2bd;
+}
+
+:root[data-theme=cobalt] {
+  color-scheme: light;
+  --theme-page: #edf2fa;
+  --theme-surface: #f9fbff;
+  --theme-text: #1b2e53;
+  --theme-muted: #4d6283;
+  --theme-border: #d0dbed;
+  --theme-accent: #2148a0;
+  --theme-accent-strong: #173779;
+  --theme-accent-soft: #e0eaff;
+  --theme-accent-border: #829ed2;
+  --theme-hero: #e1eaff;
+  --signature-topbar: linear-gradient(112deg, #162b5e, #213d7c 76%, #284986);
+  --signature-panel: #eef3fc;
+  --signature-control: #f9fbff;
+  --signature-control-border: #b2c4e3;
+  --signature-hover: #e5eefc;
+  --signature-stage: #dae4f5;
+  --signature-stage-glow: #f1f7ff;
+  --signature-page: #fbfdff;
+  --signature-page-wash: #d6e4ff40;
+  --signature-title-line: #3f69bc;
+  --signature-button-sheen: linear-gradient(150deg, #ffffff18, #10275e2e);
+  --signature-button-shadow: 0 2px 7px #1c438a33;
+  --signature-scroll: #8ea5c8;
+  --signature-ready-ink: #145563;
+  --signature-ready-surface: #deedf5;
+  --signature-ready-border: #a9cbd8;
+}
+
+/* Shared layout for the three signature themes. */
+:root[data-signature-theme] .app-shell:not(.focus-mode) .topbar {
+  height: 54px;
+  padding-inline: clamp(12px, 1.7vw, 24px);
+  background: var(--signature-topbar);
+}
+
+:root[data-signature-theme] .app-shell:not(.focus-mode) .workspace-toolbar {
+  height: 48px;
+  padding-inline: clamp(10px, 1.3vw, 18px);
+}
+
+:root[data-signature-theme] .topbar .brand { gap: 9px; }
+:root[data-signature-theme] .topbar .brand-mark { width: 32px; height: 32px; border-radius: 8px; }
+:root[data-signature-theme] .topbar .brand-name { font-size: calc(22px * var(--ui-font-scale)); letter-spacing: -.6px; }
+:root[data-signature-theme] .topbar-right { gap: 16px; }
+:root[data-signature-theme] .local-badge { padding: 4px 9px; }
+
+:root[data-signature-theme] :is(.workspace-menu-trigger, .top-help, .side-rail button, .editor-tool) {
+  color: var(--theme-muted);
+}
+:root[data-signature-theme] :is(.workspace-menu-trigger:hover, .top-help:hover, .side-rail button:hover, .editor-tool:hover) {
+  color: var(--theme-text);
+}
+:root[data-signature-theme] :is(.workspace-menu-trigger.active, .side-rail button.selected, .editor-tool.active) {
+  color: var(--theme-accent-strong);
+  background: var(--theme-accent-soft);
+}
+
+:root[data-signature-theme] .workspace-actions { gap: 6px; }
+:root[data-signature-theme] .workspace-actions :is(.soft-button, .auto-button, .layout-trigger) {
+  background: var(--signature-panel);
+  border-color: var(--theme-border);
+}
+:root[data-signature-theme] .workspace-actions :is(.soft-button, .auto-button, .layout-trigger):hover {
+  background: var(--signature-hover);
+  border-color: var(--signature-control-border);
+}
+:root[data-signature-theme] .workspace-actions .primary-button {
+  background-image: var(--signature-button-sheen);
+  box-shadow: var(--signature-button-shadow);
+}
+
+:root[data-signature-theme] .app-shell :is(.editor-pane, .preview-pane) .pane-title {
+  height: 38px;
+  background: var(--theme-surface);
+}
+:root[data-signature-theme] .pane-title-label { gap: 6px; }
+:root[data-signature-theme] .pane-title-label > svg { color: var(--theme-accent); }
+:root[data-signature-theme] .pane-title-label .pane-subtitle { margin-left: 3px; }
+:root[data-signature-theme] .app-shell :is(.editor-toolbar, .pdf-toolbar) {
+  min-height: 36px;
+  background: var(--signature-panel);
+}
+:root[data-signature-theme] .app-shell .pdf-toolbar { height: 36px; gap: 16px; }
+:root[data-signature-theme] .app-shell .editor-toolbar { gap: 1px; padding: 3px 7px; }
+:root[data-signature-theme] .editor-tool {
+  min-width: 25px;
+  height: 27px;
+  gap: 1px;
+  padding-inline: 3px;
+}
+:root[data-signature-theme] .editor-tool > svg:first-child { width: 16px; height: 16px; }
+:root[data-signature-theme] .editor-tool > svg + svg { width: 9px; }
+:root[data-signature-theme] .editor-toolbar .tool-divider { flex: none; margin-inline: 3px; background: var(--theme-border); }
+
+:root[data-signature-theme] .side-panel-header { height: 43px; }
+:root[data-signature-theme] .panel-project { padding-block: 10px; }
+:root[data-signature-theme] .outline-heading { height: 35px; }
+:root[data-signature-theme] .side-rail button { width: min(34px, 100%); height: 35px; }
+:root[data-signature-theme] .panel-file-row.active > button:first-child { color: var(--theme-accent-strong); }
+:root[data-signature-theme] .panel-file-row small { background: var(--signature-control); }
+
+:root[data-signature-theme] :is(.sidebar-width-resizer, .pane-resizer) { background: var(--theme-page); }
+:root[data-signature-theme] :is(.sidebar-width-resizer, .pane-resizer)::after {
+  inset-inline: 0;
+  background: linear-gradient(90deg, transparent calc(50% - .5px), var(--theme-border) calc(50% - .5px) calc(50% + .5px), transparent calc(50% + .5px));
+}
+:root[data-signature-theme] :is(.sidebar-width-resizer, .pane-resizer):is(:hover, :focus-visible)::after {
+  background: linear-gradient(90deg, transparent calc(50% - 1px), var(--theme-accent) calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px));
+}
+
+:root[data-signature-theme] :is(.visual-editor, .preview-pane .pdf-stage) {
+  background: radial-gradient(ellipse 80% 40% at 50% 0%, var(--signature-stage-glow), transparent), var(--signature-stage);
+}
+:root[data-signature-theme] .preview-pane .pdf-stage { padding-top: 18px; }
+:root[data-signature-theme] .layout-split .visual-page {
+  width: min(calc(100% - 28px), 860px);
+  margin: 18px auto 20px;
+  padding-inline: clamp(17px, 4.2%, 44px);
+}
+:root[data-signature-theme] .visual-page {
+  border-radius: 7px;
+  background-image: linear-gradient(150deg, var(--signature-page-wash), transparent 200px);
+  border-color: var(--theme-border);
+  line-height: 1.82;
+}
+:root[data-signature-theme] .visual-title {
+  margin: 1.55em 0 1.65em;
+  padding-bottom: 1em;
+  background: linear-gradient(90deg, transparent, var(--signature-title-line) 50%, transparent) no-repeat bottom center / 58px 1px;
+}
+:root[data-signature-theme] .visual-title h1 { margin-bottom: .4em; letter-spacing: -.02em; line-height: 1.3; }
+:root[data-signature-theme] :is(.visual-title-author, .visual-title-date) { color: var(--theme-muted); font-size: .9em; }
+:root[data-signature-theme] .visual-heading { margin: 1em 0 .5em; }
+:root[data-signature-theme] .visual-blank-line > .visual-blank-editable,
+:root[data-signature-theme] .visual-blank-line { min-height: 1.4em; }
+:root[data-signature-theme] .visual-page .visual-target {
+  outline: 1px solid var(--theme-accent-border);
+  outline-offset: 3px;
+}
+
+@media (max-width: 780px) {
+  :root[data-signature-theme] .layout-split .visual-page { width: calc(100% - 16px); }
+  :root[data-signature-theme] .topbar-right { gap: 8px; }
+}
+
+/* Light signature themes give the shell, writing paper and preview distinct surfaces. */
+:root:is([data-theme=vermilion], [data-theme=cobalt]) :is(body, .app-shell, .dashboard-shell, .standalone-pdf) {
+  background: var(--theme-page);
+  color: var(--theme-text);
+}
+:root:is([data-theme=vermilion], [data-theme=cobalt]) :is(
+  .workspace-toolbar, .pane-title, .side-panel, .side-panel-header, .panel-project, .panel-card, .panel-action,
+  .log-panel, .log-heading, .dashboard-project-card, .dashboard-icon-button, .dashboard-search,
+  .workspace-menu-popover, .editor-tool-popover, .layout-menu, .modal, .insert-dialog, .review-dialog, .ai-diff-dialog,
+  .workspace-location-menu, .workspace-root-dialog, .workspace-root-choices button
+) {
+  background: var(--theme-surface);
+  color: var(--theme-text);
+  border-color: var(--theme-border);
+}
+:root:is([data-theme=vermilion], [data-theme=cobalt]) :is(
+  .topbar, .dashboard-nav, .workspace-sidebar, .side-rail, .preview-pane, .outline-heading, .editor-toolbar, .pdf-toolbar,
+  .log-panel pre, .dashboard-card-actions, .appearance-settings, .insert-dialog-head, .insert-dialog-actions
+) { border-color: var(--theme-border); }
+:root:is([data-theme=vermilion], [data-theme=cobalt]) :is(
+  .side-rail, .dashboard-nav, .outline-heading, .preview-pane, .standalone-header, .log-panel pre, .agent-console-head
+) {
+  background: var(--signature-panel);
+  color: var(--theme-text);
+}
+:root:is([data-theme=vermilion], [data-theme=cobalt]) :is(.editor-pane, .editor-wrap, .visual-page) {
+  background-color: var(--signature-page);
+  color: var(--theme-text);
+}
+:root:is([data-theme=vermilion], [data-theme=cobalt]) :is(
+  .panel-project strong, .pane-title-label, .crumbs strong, .dashboard-project-heading h2, .dashboard-project-open strong,
+  .workspace-location-menu h3, .workspace-root-dialog h2, .appearance-settings > strong, .outline-list button.active
+) { color: var(--theme-accent-strong); }
+:root:is([data-theme=vermilion], [data-theme=cobalt]) :is(
+  .panel-project small, .panel-file-title, .crumbs, .pane-subtitle, .save-state, .pdf-sync-hint, .pdf-empty,
+  .layout-menu-title, .dashboard-project-date, .appearance-label, .appearance-settings label, .outline-list button small
+) { color: var(--theme-muted); }
+:root:is([data-theme=vermilion], [data-theme=cobalt]) :is(
+  .icon-button, .page-control, .zoom-control, .pdf-toolbar button, .outline-list button, .panel-file-row > button:first-child,
+  .editor-mode-switch button, .workspace-menu-popover button, .editor-tool-popover button, .layout-menu button,
+  .dashboard-nav-item, .dashboard-card-actions button, .agent-input-options button,
+  .workspace-actions .soft-button, .workspace-actions .layout-trigger
+) { color: var(--theme-muted); }
+:root:is([data-theme=vermilion], [data-theme=cobalt]) :is(
+  .project-avatar, .panel-file-row small, .dashboard-nav-item.active, .editor-mode-switch button.active,
+  .outline-list button.active, .layout-menu button.selected, .search-options button.active
+) {
+  background: var(--theme-accent-soft);
+  color: var(--theme-accent-strong);
+  box-shadow: none;
+}
+:root:is([data-theme=vermilion], [data-theme=cobalt]) :is(
+  .editor-mode-switch, .focus-toggle, .appearance-settings select, .theme-options button:not(.selected)
+) {
+  background: var(--signature-control);
+  color: var(--theme-muted);
+  border-color: var(--signature-control-border);
+}
+:root:is([data-theme=vermilion], [data-theme=cobalt]) .focus-toggle:is(:hover, .active) {
+  background: var(--theme-accent-soft);
+  color: var(--theme-accent-strong);
+}
+:root:is([data-theme=vermilion], [data-theme=cobalt]) :is(
+  .workspace-menu-popover button, .editor-tool-popover button, .layout-menu button,
+  .panel-file-row, .outline-list button, .dashboard-nav-item
+):hover {
+  background: var(--theme-accent-soft);
+  color: var(--theme-accent-strong);
+}
+:root:is([data-theme=vermilion], [data-theme=cobalt]) .local-badge {
+  color: var(--signature-ready-ink);
+  background: var(--signature-ready-surface);
+  border-color: var(--signature-ready-border);
+}
+:root:is([data-theme=vermilion], [data-theme=cobalt]) .dashboard-welcome {
+  background: radial-gradient(ellipse at 96% 0%, var(--theme-accent-soft), transparent 65%), linear-gradient(115deg, var(--theme-surface), var(--theme-hero));
+  border-color: var(--theme-border);
+}
+:root:is([data-theme=vermilion], [data-theme=cobalt]) .dashboard-welcome p { color: var(--theme-muted); }
+:root:is([data-theme=vermilion], [data-theme=cobalt]) :is(.dashboard-project-card, .visual-page) {
+  box-shadow: 0 5px 20px color-mix(in srgb, var(--theme-text) 8%, transparent);
+}
+:root:is([data-theme=vermilion], [data-theme=cobalt]) .pdf-page {
+  background: #fff;
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--theme-text) 20%, transparent);
+}
+:root:is([data-theme=vermilion], [data-theme=cobalt]) :is(.visual-editor, .pdf-stage, .outline-list) {
+  scrollbar-width: thin;
+  scrollbar-color: var(--signature-scroll) var(--signature-stage);
+}
+:root:is([data-theme=vermilion], [data-theme=cobalt]) :is(button, a, input, select, textarea):focus-visible {
+  outline: 2px solid var(--theme-accent);
+  outline-offset: 2px;
+}
+:root[data-theme=vermilion] .topbar .brand-name { color: var(--theme-accent-strong); }
+:root[data-theme=cobalt] .topbar :is(.brand-name, .workspace-menu-trigger, .top-help) { color: #eff5ff; }
+:root[data-theme=cobalt] .topbar .workspace-menu-trigger:is(:hover, .active) { background: #ffffff24; }
+:root[data-theme=cobalt] .topbar :is(button, a):focus-visible { outline-color: #c6d9ff; }
+
+:root:is([data-theme=vermilion], [data-theme=cobalt]) .landing-page {
+  --lp-paper: var(--theme-page);
+  --lp-ink: var(--theme-text);
+  --lp-muted: var(--theme-muted);
+  --lp-line: var(--theme-border);
+  --lp-accent: var(--theme-accent);
+}
+:root:is([data-theme=vermilion], [data-theme=cobalt]) .landing-page :is(.lp-header, .lp-footer, .lp-feature, .lp-hero-bottom) {
+  background: var(--theme-surface);
+  border-color: var(--theme-border);
+}
+:root:is([data-theme=vermilion], [data-theme=cobalt]) .lp-hero {
+  background: radial-gradient(ellipse at 77% 32%, var(--theme-hero), transparent 70%), var(--signature-panel);
+}
+:root:is([data-theme=vermilion], [data-theme=cobalt]) .landing-page :is(.lp-hero h1 em, .lp-kicker, .lp-section-index, .lp-nav-cta) {
+  color: var(--theme-accent-strong);
+}
+:root:is([data-theme=vermilion], [data-theme=cobalt]) .lp-button-primary { background: var(--theme-accent); }

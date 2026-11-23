@@ -15,7 +15,7 @@
 .git-branch-preview { width: 100%; max-height: 180px; overflow: auto; padding: 8px; border: 1px solid #dce7ef; background: #f7fbfe; color: #35546d; white-space: pre-wrap; word-break: break-word; font-size: 10px; }
 .git-collab-message { width: 100%; color: var(--theme-accent-strong); font-size: 11px; }
 .git-collab-message.error { color: #b53c38; overflow-wrap: anywhere; }
-:root[data-theme=night] .git-collaboration input, :root[data-theme=night] .git-collaboration select, :root[data-theme=night] .git-branch-preview { background: #27384e; color: #e0eafa; border-color: #45617d; }
+:root:is([data-theme=night], [data-theme=miku]) .git-collaboration input, :root:is([data-theme=night], [data-theme=miku]) .git-collaboration select, :root:is([data-theme=night], [data-theme=miku]) .git-branch-preview { background: var(--night-control); color: var(--theme-text); border-color: var(--night-control-border); }
 :root[data-theme=eye] .git-collaboration input, :root[data-theme=eye] .git-collaboration select, :root[data-theme=eye] .git-branch-preview { background: #f1faf2; color: #263f33; border-color: #a8cdb0; }
 .review-origin, .review-stale { display: block; margin: 4px 0; font-size: 10px; color: #6e899e; }
 .review-stale { color: #a36b30; }

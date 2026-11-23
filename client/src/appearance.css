@@ -5,7 +5,32 @@ button,input,select,textarea{font-family:var(--ui-font-family)}
 :root[data-theme=violet]{--theme-accent:#7364ab;--theme-accent-strong:#5b4c91;--theme-accent-soft:#f0edfa;--theme-accent-border:#d0c6e7;--theme-hero:#f0edfa}
 :root[data-theme=forest]{--theme-accent:#43836b;--theme-accent-strong:#316950;--theme-accent-soft:#e9f4ed;--theme-accent-border:#b9d9c5;--theme-hero:#e9f3e9}
 :root[data-theme=eye]{--theme-accent:#3f8060;--theme-accent-strong:#2e6548;--theme-accent-soft:#e1f3e4;--theme-accent-border:#9bcba7;--theme-hero:#c7edcc}
-:root[data-theme=night]{color-scheme:dark;--theme-accent:#79ace9;--theme-accent-strong:#a8caff;--theme-accent-soft:#293c55;--theme-accent-border:#52749c;--theme-hero:#1a2940}
+:root[data-theme=night] {
+  color-scheme: dark;
+  --theme-page: #0f1018;
+  --theme-surface: #1e1e2b;
+  --theme-text: #eee9f0;
+  --theme-muted: #b8afc1;
+  --theme-border: #383447;
+  --theme-accent: #e5b975;
+  --theme-accent-strong: #f5d5a0;
+  --theme-accent-soft: #3c2e2a;
+  --theme-accent-border: #796149;
+  --theme-hero: #252033;
+  --night-panel: #171822;
+  --night-editor: #14151f;
+  --night-control: #272635;
+  --night-control-border: #595269;
+  --night-hover: #322d41;
+  --night-action-ink: #241a12;
+  --night-teal: #92d7c8;
+  --night-teal-soft: #1e322f;
+  --night-error: #f3b2aa;
+  --night-error-soft: #3d292f;
+  --night-scroll: #60596f;
+  background: var(--theme-page);
+  color: var(--theme-text);
+}
 .primary-button,.search-row button,.panel-card button,.ai-input button:last-child{background:var(--theme-accent);border-color:var(--theme-accent);color:#fff}
 .primary-button:hover:not(:disabled){background:var(--theme-accent-strong)}
 .brand-mark{background:#fff;border:1px solid #d8e5ef;padding:3px;overflow:hidden}
@@ -23,19 +48,127 @@ button,input,select,textarea{font-family:var(--ui-font-family)}
 :root[data-theme=eye] input,:root[data-theme=eye] select,:root[data-theme=eye] textarea{background:#f1faf2;color:#263f33;border-color:#a8cdb0}
 :root[data-theme=eye] .log-panel,:root[data-theme=eye] .log-heading,:root[data-theme=eye] .log-panel pre,:root[data-theme=eye] .utility-strip{background:#d9efdc;color:#355843;border-color:#add2b5}
 :root[data-theme=eye] .dashboard-hero{background:linear-gradient(110deg,#ddf1e0 0%,#c7edcc 70%,#bde5c4 100%)}
-:root[data-theme=night] body,:root[data-theme=night] .app-shell,:root[data-theme=night] .dashboard,:root[data-theme=night] .standalone-pdf{background:#111b2a;color:#dce7f3}
-:root[data-theme=night] .topbar,:root[data-theme=night] .workspace-toolbar,:root[data-theme=night] .editor-pane,:root[data-theme=night] .pane-title,:root[data-theme=night] .side-panel,:root[data-theme=night] .panel-card,:root[data-theme=night] .project-card,:root[data-theme=night] .modal,:root[data-theme=night] .workspace-menu-popover,:root[data-theme=night] .editor-tool-popover,:root[data-theme=night] .layout-menu,:root[data-theme=night] .log-panel,:root[data-theme=night] .log-heading,:root[data-theme=night] .log-panel pre,:root[data-theme=night] .standalone-header,:root[data-theme=night] .art-document,:root[data-theme=night] .art-compiled{background:#202d40;color:#dce7f3;border-color:#344860}
-:root[data-theme=night] .workspace-sidebar,:root[data-theme=night] .side-rail,:root[data-theme=night] .preview-pane,:root[data-theme=night] .pdf-stage,:root[data-theme=night] .editor-toolbar,:root[data-theme=night] .pdf-toolbar,:root[data-theme=night] .side-panel-content,:root[data-theme=night] .outline-heading,:root[data-theme=night] .utility-strip{background:#172438;color:#dce7f3;border-color:#344860}
-:root[data-theme=night] .dashboard-hero{background:linear-gradient(110deg,#162338,var(--theme-hero));border-color:#344860}
-:root[data-theme=night] .dashboard-hero p,:root[data-theme=night] .section-top p,:root[data-theme=night] .card-meta,:root[data-theme=night] .card-footer,:root[data-theme=night] .panel-card p,:root[data-theme=night] .settings-panel p,:root[data-theme=night] .save-state,:root[data-theme=night] .crumbs,:root[data-theme=night] .pane-subtitle{color:#a9bdd0}
-:root[data-theme=night] .brand,:root[data-theme=night] .top-help,:root[data-theme=night] .side-panel-header,:root[data-theme=night] .panel-card strong,:root[data-theme=night] .settings-panel>strong,:root[data-theme=night] .settings-panel label,:root[data-theme=night] .pane-title,:root[data-theme=night] .crumbs strong,:root[data-theme=night] .panel-project strong,:root[data-theme=night] .outline-heading,:root[data-theme=night] .project-card strong,:root[data-theme=night] .section-top h2,:root[data-theme=night] .hero-copy h1{color:#e2ecfa}
-:root[data-theme=night] input,:root[data-theme=night] select,:root[data-theme=night] textarea,:root[data-theme=night] .outline-button,:root[data-theme=night] .soft-button,:root[data-theme=night] .auto-button,:root[data-theme=night] .layout-trigger,:root[data-theme=night] .panel-action,:root[data-theme=night] .ai-quick-actions button,:root[data-theme=night] .replace-row button{background:#27384e;color:#e0eafa;border-color:#45617d}
-:root[data-theme=night] .workspace-menu-popover button,:root[data-theme=night] .editor-tool-popover button,:root[data-theme=night] .layout-menu button,:root[data-theme=night] .panel-file-row>button:first-child,:root[data-theme=night] .outline-list button,:root[data-theme=night] .search-results button span{color:#c5d7e9}
-:root[data-theme=night] .panel-file-row:hover,:root[data-theme=night] .workspace-menu-popover button:hover,:root[data-theme=night] .editor-tool-popover button:hover,:root[data-theme=night] .layout-menu button:hover{background:#32445c}
-:root[data-theme=night] .side-rail button.selected,:root[data-theme=night] .panel-file-row.active,:root[data-theme=night] .layout-menu button.selected,:root[data-theme=night] .workspace-menu-trigger.active{background:#2b4564;color:#b9d7ff}
-:root[data-theme=night] .pdf-page{background:#fff}
-:root[data-theme=night] .workspace-menu-trigger,:root[data-theme=night] .editor-tool,:root[data-theme=night] .side-rail button,:root[data-theme=night] .pane-title-label,:root[data-theme=night] .pdf-toolbar button,:root[data-theme=night] .page-control,:root[data-theme=night] .zoom-control,:root[data-theme=night] .top-help,:root[data-theme=night] .utility-strip button{color:#bdcee2}
-:root[data-theme=night] .workspace-menu-trigger:hover,:root[data-theme=night] .editor-tool:hover,:root[data-theme=night] .side-rail button:hover{background:#344b68;color:#f0f6ff}
-:root[data-theme=night] .editor-type,:root[data-theme=night] .panel-tabs,:root[data-theme=night] .local-badge{background:#2a4059;color:#d4e5f4;border-color:#45617d}
-:root[data-theme=night] .review-card,:root[data-theme=night] .history-card,:root[data-theme=night] .ai-result,:root[data-theme=night] .search-results button,:root[data-theme=night] .panel-tabs button.active{background:#202d40;color:#dce7f3;border-color:#344860}
-:root[data-theme=night] .review-card p,:root[data-theme=night] .history-card strong,:root[data-theme=night] .git-commits span,:root[data-theme=night] .outline-list button span{color:#c8d9e9}
+:root:is([data-theme=night], [data-theme=miku]) :is(body, .app-shell, .dashboard, .standalone-pdf) {
+  background: var(--theme-page);
+  color: var(--theme-text);
+}
+:root:is([data-theme=night], [data-theme=miku]) :is(.topbar, .standalone-header) {
+  background: linear-gradient(105deg, #222031, var(--night-panel) 64%);
+  border-color: var(--theme-border);
+}
+:root:is([data-theme=night], [data-theme=miku]) :is(.brand-mark, .standalone-brand img) {
+  background: #f5ebdc;
+  border-color: #d2b88d;
+  box-shadow: none;
+}
+:root:is([data-theme=night], [data-theme=miku]) :is(.brand-name, .standalone-brand) { color: var(--theme-accent-strong); }
+
+:root:is([data-theme=night], [data-theme=miku]) :is(.workspace-toolbar, .pane-title, .side-panel, .panel-card, .project-card, .modal, .log-panel, .log-heading,
+  .art-document, .art-compiled, .review-card, .history-card, .ai-result, .search-results button,
+  .review-dialog, .ai-diff-dialog, .insert-dialog) {
+  background: var(--theme-surface);
+  color: var(--theme-text);
+  border-color: var(--theme-border);
+}
+:root:is([data-theme=night], [data-theme=miku]) :is(.workspace-menu-popover, .editor-tool-popover, .layout-menu) {
+  background: var(--theme-surface);
+  border-color: var(--night-control-border);
+  box-shadow: 0 16px 35px #08081080;
+}
+:root:is([data-theme=night], [data-theme=miku]) :is(.editor-pane, .editor-wrap, .log-panel pre) { background: var(--night-editor); color: var(--theme-text); }
+:root:is([data-theme=night], [data-theme=miku]) :is(.workspace-sidebar, .side-rail, .preview-pane, .editor-toolbar, .pdf-toolbar, .side-panel-content, .outline-heading, .utility-strip) {
+  background: var(--night-panel);
+  color: var(--theme-text);
+  border-color: var(--theme-border);
+}
+:root:is([data-theme=night], [data-theme=miku]) :is(.utility-strip, .standalone-header) { border-color: var(--theme-border); }
+:root:is([data-theme=night], [data-theme=miku]) :is(.side-panel-header, .panel-project, .dashboard-card-actions) { border-color: var(--theme-border); }
+:root:is([data-theme=night], [data-theme=miku]) :is(.project-avatar, .panel-file-row small) {
+  background: var(--theme-accent-soft);
+  color: var(--theme-accent-strong);
+}
+:root:is([data-theme=night], [data-theme=miku]) :is(.dashboard-hero, .dashboard-welcome) {
+  background: radial-gradient(ellipse at 92% 4%, #4b343c80, transparent 54%), linear-gradient(115deg, #171a28, var(--theme-hero));
+  border-color: var(--theme-border);
+}
+:root:is([data-theme=night], [data-theme=miku]) :is(.dashboard-hero p, .section-top p, .card-meta, .card-footer, .panel-card p, .settings-panel p, .save-state,
+  .crumbs, .pane-subtitle, .panel-project small, .panel-file-heading, .layout-menu-title, .pdf-sync-hint, .pdf-empty, .outline-list button small, .search-results > strong,
+  .search-results button small) { color: var(--theme-muted); }
+:root:is([data-theme=night], [data-theme=miku]) :is(.crumbs strong, .panel-project strong, .outline-heading, .project-card strong, .section-top h2, .hero-copy h1,
+  .side-panel-header, .settings-panel > strong, .settings-panel label, .history-card strong, .review-card p) { color: var(--theme-text); }
+:root:is([data-theme=night], [data-theme=miku]) :is(.workspace-menu-trigger, .editor-tool, .side-rail button, .pane-title-label, .pdf-toolbar button, .page-control, .zoom-control,
+  .top-help, .utility-strip button, .icon-button, .workspace-menu-popover button, .editor-tool-popover button, .layout-menu button,
+  .panel-file-row > button:first-child, .outline-list button, .search-results button span, .log-heading, .git-commits span, .side-panel-footer) {
+  color: var(--theme-text);
+}
+:root:is([data-theme=night], [data-theme=miku]) :is(input, select, textarea, .outline-button, .soft-button, .auto-button, .layout-trigger, .panel-action,
+  .ai-quick-actions button, .replace-row button, .panel-tabs, .editor-mode-switch, .editor-type) {
+  background: var(--night-control);
+  color: var(--theme-text);
+  border-color: var(--night-control-border);
+}
+:root:is([data-theme=night], [data-theme=miku]) :is(.layout-menu-divider, .editor-tool-divider, .side-rail-divider) { background: var(--theme-border); }
+:root:is([data-theme=night], [data-theme=miku]) :is(.editor-mode-switch button, .panel-tabs button, .search-options button) { color: var(--theme-muted); }
+:root:is([data-theme=night], [data-theme=miku]) :is(.panel-file-row:hover, .workspace-menu-popover button:hover, .editor-tool-popover button:hover, .layout-menu button:hover,
+  .workspace-menu-trigger:hover, .editor-tool:hover, .side-rail button:hover, .outline-list button:hover, .soft-button:hover, .layout-trigger:hover,
+  .icon-button:hover, .pdf-toolbar button:hover) { background: var(--night-hover); color: var(--theme-text); }
+:root:is([data-theme=night], [data-theme=miku]) :is(.side-rail button.selected, .panel-file-row.active, .layout-menu button.selected, .workspace-menu-trigger.active,
+  .editor-mode-switch button.active, .outline-list button.active, .panel-tabs button.active, .search-options button.active) {
+  background: var(--theme-accent-soft);
+  color: var(--theme-accent-strong);
+}
+:root:is([data-theme=night], [data-theme=miku]) .side-rail button.selected { box-shadow: inset 2px 0 var(--theme-accent); }
+:root:is([data-theme=night], [data-theme=miku]) .editor-mode-switch button.active { box-shadow: none; }
+:root:is([data-theme=night], [data-theme=miku]) :is(.primary-button, .search-row button, .panel-card button, .ai-input button:last-child) {
+  color: var(--night-action-ink);
+  background: var(--theme-accent);
+  border-color: var(--theme-accent);
+}
+:root:is([data-theme=night], [data-theme=miku]) .primary-button { box-shadow: 0 2px 10px #e5b97520; }
+:root:is([data-theme=night], [data-theme=miku]) .primary-button:hover:not(:disabled) { background: var(--theme-accent-strong); }
+:root:is([data-theme=night], [data-theme=miku]) .local-badge {
+  color: var(--night-teal);
+  background: var(--night-teal-soft);
+  border-color: #38564f;
+}
+:root:is([data-theme=night], [data-theme=miku]) :is(.auto-button.on, .log-status) { color: var(--night-teal); }
+:root:is([data-theme=night], [data-theme=miku]) .dashboard-welcome-mark {
+  background: #2a2434;
+  box-shadow: 0 6px 24px #09081155;
+}
+:root:is([data-theme=night], [data-theme=miku]) .pdf-stage {
+  background: radial-gradient(ellipse at 50% 0%, #2e293b, transparent 72%), var(--theme-page);
+  color: var(--theme-text);
+  scrollbar-color: var(--night-scroll) var(--theme-page);
+}
+:root:is([data-theme=night], [data-theme=miku]) .pdf-page { background: #fff; box-shadow: 0 8px 28px #06050aa0; }
+:root:is([data-theme=night], [data-theme=miku]) :is(.visual-editor, .side-panel-content, .outline-list, .agent-transcript) {
+  scrollbar-width: thin;
+  scrollbar-color: var(--night-scroll) var(--theme-page);
+}
+:root:is([data-theme=night], [data-theme=miku]) :is(.pdf-empty-icon, .side-empty, .empty-state) { color: var(--theme-muted); }
+:root:is([data-theme=night], [data-theme=miku]) :is(.sidebar-width-resizer, .pane-resizer) { background: var(--theme-border); }
+:root:is([data-theme=night], [data-theme=miku]) :is(.sidebar-width-resizer, .pane-resizer)::after { background: var(--night-control-border); }
+:root:is([data-theme=night], [data-theme=miku]) :is(.sidebar-width-resizer, .pane-resizer):hover::after { background: var(--theme-accent); }
+:root:is([data-theme=night], [data-theme=miku]) :is(.modal, .review-dialog, .ai-diff-dialog) { box-shadow: 0 22px 55px #070811a0; }
+:root:is([data-theme=night], [data-theme=miku]) :is(.review-dialog pre, .ai-diff-columns pre, .insert-dialog pre) {
+  background: var(--night-editor);
+  color: var(--theme-text);
+  border-color: var(--theme-border);
+}
+:root:is([data-theme=night], [data-theme=miku]) :is(.review-dialog > small, .ai-diff-columns strong, .insert-dialog label, .insert-dialog small) {
+  color: var(--theme-muted);
+}
+:root:is([data-theme=night], [data-theme=miku]) :is(.review-dialog > div:last-child button, .ai-diff-actions button, .insert-dialog-actions button) {
+  background: var(--night-control);
+  color: var(--theme-text);
+  border-color: var(--night-control-border);
+}
+:root:is([data-theme=night], [data-theme=miku]) :is(.review-dialog > div:last-child button:last-child, .ai-diff-actions button:last-child,
+  .insert-dialog-actions button:last-child, .agent-profile-settings .agent-settings-actions button:first-child, .agent-add-profile button) {
+  background: var(--theme-accent);
+  color: var(--night-action-ink);
+  border-color: var(--theme-accent);
+}
+:root:is([data-theme=night], [data-theme=miku]) :is(.notice, .agent-error, .visual-media-error, .review-dialog p[role=alert]) { color: var(--night-error); }
+:root:is([data-theme=night], [data-theme=miku]) :is(button, a, input, select, textarea):focus-visible { outline: 2px solid var(--theme-accent); outline-offset: 2px; }

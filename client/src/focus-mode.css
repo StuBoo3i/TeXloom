@@ -13,8 +13,8 @@
 .focus-mode .editor-toolbar{min-height:38px;padding-block:2px}
 .focus-mode .visual-page{width:min(calc(100% - 36px),1340px);padding-inline:clamp(28px,5vw,88px);margin-top:8px}
 .focus-mode .focus-toggle{margin-right:4px}
-:root[data-theme=night] .focus-toggle{background:#27384e;color:#dce7f3;border-color:#45617d}
-:root[data-theme=night] .focus-toggle:hover,:root[data-theme=night] .focus-toggle.active{background:#426d9e;color:#fff}
+:root:is([data-theme=night], [data-theme=miku]) .focus-toggle{background:var(--night-control);color:var(--theme-text);border-color:var(--night-control-border)}
+:root:is([data-theme=night], [data-theme=miku]) .focus-toggle:hover,:root:is([data-theme=night], [data-theme=miku]) .focus-toggle.active{background:var(--theme-accent);color:var(--night-action-ink)}
 :root[data-theme=eye] .focus-toggle{background:#def1e1;color:#2e6548;border-color:#9bcba7}
 :root[data-theme=eye] .focus-toggle:hover,:root[data-theme=eye] .focus-toggle.active{background:#3f8060;color:#fff}
 @media(max-width:700px){.focus-mode .visual-page{width:calc(100% - 12px);padding-inline:18px}.focus-toggle kbd{display:none}}

@@ -1,3 +1,5 @@
+import { t, useLanguage } from './i18n'
+import { LanguageToggle } from './language-toggle'
 import React, { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import Editor from '@monaco-editor/react'
@@ -10,7 +12,8 @@ import { Dashboard } from './dashboard'
 import { Landing } from './landing'
 import { WorkspaceRootDialog, type WorkspaceInfo } from './workspace-root'
 import type { AiSettingsInput } from './ai-service-settings'
-import { EditorToolbar, WorkspaceMenuBar, WorkspaceSidebar, type AiOutputView, type AiSettingsView, type GitState, type PanelId, type ReviewThread, type Snapshot } from './workspace-ui'
+import { EditorToolbar, WorkspaceMenuBar, WorkspaceSidebar, type AiOutputView, type AiSettingsView, type GitState, type PanelId, type ReviewThread } from './workspace-ui'
+import type { Snapshot } from '../../shared/snapshots'
 import { InsertDialog, type ImageSource, type InsertKind } from './insert-dialog'
 import { ReviewDialog, type ReviewDraft } from './review-dialog'
 import { AiDiffDialog } from './ai-diff-dialog'
@@ -22,13 +25,15 @@ import { registerLatexCompletion, type CompletionContext } from './latex-complet
 import { buildReferenceIndex, type IndexedSource } from './reference-index'
 import { VisualEditor } from './visual-editor'
 import { highlightColors } from './highlight'
-import { draftCardKey, replaceSourceSpan, type SourceSpan, type VisualBlock } from './visual-latex'
+import { draftCardKey, parseVisualLatex, replaceSourceSpan, type SourceSpan, type VisualBlock } from './visual-latex'
 import './styles.css'
 import './preview.css'
 import './layout.css'
-import './shortcuts.css'
+import { ShortcutsDialog } from './shortcuts-dialog'
 import './appearance.css'
 import './focus-mode.css'
+import './signature-workbench.css'
+import './miku-theme.css'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl
 applyAppearance(readAppearance())
@@ -44,7 +49,7 @@ async function api<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, options)
   if (!response.ok) {
     const data = await response.json().catch(() => ({})) as { error?: string }
-    throw new Error(data.error || `请求失败 (${response.status})`)
+    throw new Error(data.error || t("请求失败 ({0})", response.status))
   }
   return response.json() as Promise<T>
 }
@@ -58,14 +63,14 @@ function PdfPreview({ projectId, version, mode = 'full', target, onReverse }: { 
   const [zoom, setZoom] = useState(1)
   const [stageWidth, setStageWidth] = useState(500)
   const [rendered, setRendered] = useState({ page: 0, scale: 1 })
-  const [error, setError] = useState('')
+  const [unavailable, setUnavailable] = useState(false)
 
   useEffect(() => {
     let cancelled = false
     setPdf(null)
-    setError('')
+    setUnavailable(false)
     const task = pdfjsLib.getDocument({ url: `/api/projects/${projectId}/pdf?mode=${mode}&v=${version}`, withCredentials: false })
-    task.promise.then(doc => { if (!cancelled) { setPdf(doc); setPage(1) } }).catch(() => { if (!cancelled) setError('尚无 PDF，点击“编译”生成预览。') })
+    task.promise.then(doc => { if (!cancelled) { setPdf(doc); setPage(1) } }).catch(() => { if (!cancelled) setUnavailable(true) })
     return () => { cancelled = true; void task.destroy() }
   }, [projectId, version, mode])
 
@@ -117,9 +122,9 @@ function PdfPreview({ projectId, version, mode = 'full', target, onReverse }: { 
   }
 
   return <section className="preview-pane">
-    <div className="pane-title"><div className="pane-title-label"><FileText size={17} /><strong>PDF 预览</strong><span className="pane-subtitle">{mode === 'draft' ? '草稿 · 图表占位' : '完整编译结果'}</span></div><a className="icon-button" aria-label="下载 PDF" title="下载 PDF" href={`/api/projects/${projectId}/pdf?mode=${mode}&v=${version}`} download={mode === 'draft' ? 'draft.pdf' : 'document.pdf'}><Download size={17} /></a></div>
-    <div className="pdf-toolbar"><div className="page-control"><button onClick={() => setPage(Math.max(1, page - 1))} disabled={!pdf || page <= 1} aria-label="上一页"><ChevronLeft size={16} /></button><span>{pdf ? `${page} / ${pdf.numPages}` : '— / —'}</span><button onClick={() => setPage(Math.min(pdf?.numPages ?? 1, page + 1))} disabled={!pdf || page >= pdf.numPages} aria-label="下一页"><ChevronRight size={16} /></button></div><div className="zoom-control"><button onClick={() => setZoom(Math.max(.6, +(zoom - .1).toFixed(1)))} aria-label="缩小"><ZoomOut size={16} /></button><span>{Math.round(zoom * 100)}%</span><button onClick={() => setZoom(Math.min(2, +(zoom + .1).toFixed(1)))} aria-label="放大"><ZoomIn size={16} /></button></div>{onReverse && <span className="pdf-sync-hint">双击页面定位源码</span>}</div>
-    <div ref={stage} className="pdf-stage">{pdf ? <div className="pdf-page-wrap"><canvas ref={canvas} className={`pdf-page ${onReverse ? 'reverse-enabled' : ''}`} title={onReverse ? '双击定位到源码' : undefined} onDoubleClick={reverseAt} />{target && rendered.page === target.page && <span key={target.serial} className="pdf-sync-marker" style={{ left: target.x * rendered.scale, top: target.y * rendered.scale }} />}</div> : <div className="pdf-empty"><div className="pdf-empty-icon"><FileText size={34} strokeWidth={1.5} /></div><strong>预览将在这里显示</strong><p>{error || '正在载入 PDF…'}</p></div>}</div>
+    <div className="pane-title"><div className="pane-title-label"><FileText size={17} /><strong>{t("PDF 预览")}</strong><span className="pane-subtitle">{mode === 'draft' ? t("草稿 · 图表占位") : t("完整编译结果")}</span></div><a className="icon-button" aria-label={t("下载 PDF")} title={t("下载 PDF")} href={`/api/projects/${projectId}/pdf?mode=${mode}&v=${version}`} download={mode === 'draft' ? 'draft.pdf' : 'document.pdf'}><Download size={17} /></a></div>
+    <div className="pdf-toolbar"><div className="page-control"><button onClick={() => setPage(Math.max(1, page - 1))} disabled={!pdf || page <= 1} aria-label={t("上一页")}><ChevronLeft size={16} /></button><span>{pdf ? `${page} / ${pdf.numPages}` : '— / —'}</span><button onClick={() => setPage(Math.min(pdf?.numPages ?? 1, page + 1))} disabled={!pdf || page >= pdf.numPages} aria-label={t("下一页")}><ChevronRight size={16} /></button></div><div className="zoom-control"><button onClick={() => setZoom(Math.max(.6, +(zoom - .1).toFixed(1)))} aria-label={t("缩小")}><ZoomOut size={16} /></button><span>{Math.round(zoom * 100)}%</span><button onClick={() => setZoom(Math.min(2, +(zoom + .1).toFixed(1)))} aria-label={t("放大")}><ZoomIn size={16} /></button></div>{onReverse && <span className="pdf-sync-hint">{t("双击页面定位源码")}</span>}</div>
+    <div ref={stage} className="pdf-stage">{pdf ? <div className="pdf-page-wrap"><canvas ref={canvas} className={`pdf-page ${onReverse ? 'reverse-enabled' : ''}`} title={onReverse ? t("双击定位到源码") : undefined} onDoubleClick={reverseAt} />{target && rendered.page === target.page && <span key={target.serial} className="pdf-sync-marker" style={{ left: target.x * rendered.scale, top: target.y * rendered.scale }} />}</div> : <div className="pdf-empty"><div className="pdf-empty-icon"><FileText size={34} strokeWidth={1.5} /></div><strong>{t("预览将在这里显示")}</strong><p>{unavailable ? t("尚无 PDF，点击“编译”生成预览。") : t("正在载入 PDF…")}</p></div>}</div>
   </section>
 }
 
@@ -139,14 +144,14 @@ function LayoutPicker({ layout, onChoose, onOpenTab }: { layout: Layout; onChoos
   }, [open])
   const choose = (next: Layout) => { onChoose(next); setOpen(false) }
   return <div className="layout-picker" ref={menuRef}>
-    <button className={`layout-trigger ${open ? 'active' : ''}`} onClick={() => setOpen(!open)} aria-haspopup="menu" aria-expanded={open}><Columns2 size={16} />布局<ChevronDown size={14} /></button>
-    {open && <div className="layout-menu" role="menu" aria-label="布局选项">
-      <div className="layout-menu-title">布局选项</div>
-      <button role="menuitemradio" aria-checked={layout === 'split'} className={layout === 'split' ? 'selected' : ''} onClick={() => choose('split')}><Columns2 size={18} />拆分视图{layout === 'split' && <Check className="layout-check" size={17} />}</button>
-      <button role="menuitemradio" aria-checked={layout === 'editor'} className={layout === 'editor' ? 'selected' : ''} onClick={() => choose('editor')}><Code2 size={18} />仅编辑器{layout === 'editor' && <Check className="layout-check" size={17} />}</button>
-      <button role="menuitemradio" aria-checked={layout === 'pdf'} className={layout === 'pdf' ? 'selected' : ''} onClick={() => choose('pdf')}><FileText size={18} />仅 PDF{layout === 'pdf' && <Check className="layout-check" size={17} />}</button>
+    <button className={`layout-trigger ${open ? 'active' : ''}`} onClick={() => setOpen(!open)} aria-haspopup="menu" aria-expanded={open}><Columns2 size={16} />{t("布局")}<ChevronDown size={14} /></button>
+    {open && <div className="layout-menu" role="menu" aria-label={t("布局选项")}>
+      <div className="layout-menu-title">{t("布局选项")}</div>
+      <button role="menuitemradio" aria-checked={layout === 'split'} className={layout === 'split' ? 'selected' : ''} onClick={() => choose('split')}><Columns2 size={18} />{t("拆分视图")}{layout === 'split' && <Check className="layout-check" size={17} />}</button>
+      <button role="menuitemradio" aria-checked={layout === 'editor'} className={layout === 'editor' ? 'selected' : ''} onClick={() => choose('editor')}><Code2 size={18} />{t("仅编辑器")}{layout === 'editor' && <Check className="layout-check" size={17} />}</button>
+      <button role="menuitemradio" aria-checked={layout === 'pdf'} className={layout === 'pdf' ? 'selected' : ''} onClick={() => choose('pdf')}><FileText size={18} />{t("仅 PDF")}{layout === 'pdf' && <Check className="layout-check" size={17} />}</button>
       <div className="layout-menu-divider" />
-      <button role="menuitem" onClick={() => { onOpenTab(); setOpen(false) }}><ExternalLink size={18} />在单独的选项卡中打开 PDF</button>
+      <button role="menuitem" onClick={() => { onOpenTab(); setOpen(false) }}><ExternalLink size={18} />{t("在单独的选项卡中打开 PDF")}</button>
     </div>}
   </div>
 }
@@ -227,8 +232,28 @@ function App({ onExit }: { onExit: () => void }) {
   const agentCompileQueuedRef = useRef<string | null>(null)
   const visualSelectionRef = useRef<SourceSpan | null>(null)
   const visualViewportOffsetRef = useRef(0)
+  const visualOutlineTimerRef = useRef(0)
+  const pendingCodeRestoreRef = useRef<number | null>(null)
   const visualTargetSerialRef = useRef(0)
   useEffect(() => { visualSelectionRef.current = null }, [editorMode, activePath, project?.id])
+  useEffect(() => () => window.clearTimeout(visualOutlineTimerRef.current), [editorMode, activePath, project?.id])
+  React.useLayoutEffect(() => {
+    if ((editorMode === 'visual' && activePath.endsWith('.tex')) || pendingCodeRestoreRef.current === null) return
+    const offset = pendingCodeRestoreRef.current
+    pendingCodeRestoreRef.current = null
+    let secondFrame = 0
+    const firstFrame = requestAnimationFrame(() => {
+      const editor = editorRef.current
+      const model = editor?.getModel()
+      if (!editor || !model) return
+      editor.layout()
+      const position = model.getPositionAt(Math.min(offset, model.getValueLength()))
+      editor.setPosition(position)
+      editor.revealPositionInCenter(position)
+      secondFrame = requestAnimationFrame(() => { editor.layout(); editor.revealPositionInCenter(position) })
+    })
+    return () => { cancelAnimationFrame(firstFrame); cancelAnimationFrame(secondFrame) }
+  }, [editorMode, activePath])
   const storedInsertIndex = React.useMemo(() => buildReferenceIndex(insertSources.projectId === project?.id ? insertSources.files.filter(item => item.file !== activePath) : []), [insertSources, project?.id, activePath])
   const activeInsertIndex = React.useMemo(() => buildReferenceIndex(activePath ? [{ file: activePath, source: content }] : []), [activePath, content])
   const references = React.useMemo(() => [...activeInsertIndex.references, ...storedInsertIndex.references.filter(item => !activeInsertIndex.references.some(active => active.value === item.value))], [activeInsertIndex, storedInsertIndex])
@@ -265,7 +290,7 @@ function App({ onExit }: { onExit: () => void }) {
     return () => window.removeEventListener('keydown', exitFocus)
   }, [focusMode, editorMode])
 
-  const showError = (error: unknown) => { setNotice(error instanceof Error ? error.message : String(error)); setTimeout(() => setNotice(''), 5500) }
+  const showError = (error: unknown) => { setNotice(t(error instanceof Error ? error.message : String(error))); setTimeout(() => setNotice(''), 5500) }
   const refreshProjects = async () => setProjects(await api<Project[]>('/api/projects'))
   const refreshWorkspace = async (projectId?: string) => {
     const info = await api<WorkspaceInfo>(`/api/workspace${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`)
@@ -338,8 +363,16 @@ function App({ onExit }: { onExit: () => void }) {
   useEffect(() => {
     if (!project) return
     void api<ReviewThread[]>(`/api/projects/${project.id}/review`).then(setReviewThreads).catch(showError)
-    void api<Snapshot[]>(`/api/projects/${project.id}/history`).then(setSnapshots).catch(showError)
   }, [project?.id])
+
+  useEffect(() => {
+    if (!project || activePanel !== 'history') return
+    let cancelled = false
+    void api<Snapshot[]>(`/api/projects/${project.id}/history`)
+      .then(items => { if (!cancelled) setSnapshots(items) })
+      .catch(error => { if (!cancelled) showError(error) })
+    return () => { cancelled = true }
+  }, [project?.id, activePanel])
 
   useEffect(() => {
     if (!project || activePanel !== 'integrations') return
@@ -406,6 +439,7 @@ function App({ onExit }: { onExit: () => void }) {
       setActivePath(file)
       setContent(data.content)
       setSavedContent(data.content)
+      return data.content
     } catch (error) { showError(error) }
   }
 
@@ -422,7 +456,7 @@ function App({ onExit }: { onExit: () => void }) {
       await refreshProjects()
       const currentPath = activePathRef.current
       if (paths.includes(currentPath)) {
-        if (contentRef.current !== savedContentRef.current) showError(new Error('Agent 修改已应用，但编辑器中有未保存内容；请保存或重新打开文件核对。'))
+        if (contentRef.current !== savedContentRef.current) showError(new Error(t("Agent 修改已应用，但编辑器中有未保存内容；请保存或重新打开文件核对。")))
         else {
           const nextPath = updatedFiles.some(item => item.type === 'file' && item.path === currentPath)
             ? currentPath : updatedFiles.find(item => item.type === 'file' && item.path === project.mainFile)?.path || updatedFiles.find(item => item.type === 'file' && /\.(tex|bib|txt|md|sty|cls)$/i.test(item.path))?.path
@@ -536,13 +570,13 @@ function App({ onExit }: { onExit: () => void }) {
   }
 
   async function deleteProject() {
-    if (!project || !window.confirm(`确定删除“${project.name}”及其全部文件吗？此操作无法撤销。`)) return
+    if (!project || !window.confirm(t("确定删除“{0}”及其全部文件吗？此操作无法撤销。", project.name))) return
     try { await api(`/api/projects/${project.id}`, { method: 'DELETE' }); setProject(null); setActivePath(''); await refreshProjects() }
     catch (error) { showError(error) }
   }
 
   async function deleteFile(file: string) {
-    if (!project || !window.confirm(`确定删除 ${file} 吗？`)) return
+    if (!project || !window.confirm(t("确定删除 {0} 吗？", file))) return
     try { await api(`/api/projects/${project.id}/file?path=${encodeURIComponent(file)}`, { method: 'DELETE' }); await refreshFiles(project.id); if (activePath === file) await openFile(project.id, project.mainFile) }
     catch (error) { showError(error) }
   }
@@ -609,6 +643,16 @@ function App({ onExit }: { onExit: () => void }) {
     localStorage.setItem('texloom:highlight-color', color)
   }
 
+  function updateVisualViewport(offset: number) {
+    visualViewportOffsetRef.current = offset
+    window.clearTimeout(visualOutlineTimerRef.current)
+    const line = editorRef.current?.getModel()?.getPositionAt(offset).lineNumber
+    if (line === undefined) return
+    // Keep the exact source offset while scrolling; redraw the outline once scrolling settles.
+    const headingLine = outline.reduce((last, entry) => entry.file === activePath && entry.line <= line ? entry.line : last, 0)
+    if (headingLine !== visualLine) visualOutlineTimerRef.current = window.setTimeout(() => setVisualLine(headingLine), 120)
+  }
+
   function changeMode(next: 'code' | 'visual') {
     if (next === editorMode) return
     const editor = editorRef.current
@@ -620,8 +664,7 @@ function App({ onExit }: { onExit: () => void }) {
       setVisualTarget({ offset, serial: ++visualTargetSerialRef.current })
     }
     if (next === 'code' && editor && model) {
-      const position = model.getPositionAt(Math.min(visualViewportOffsetRef.current, model.getValueLength()))
-      requestAnimationFrame(() => { editor.revealPositionInCenter(position); editor.setPosition(position) })
+      pendingCodeRestoreRef.current = visualViewportOffsetRef.current
     }
     setEditorMode(next)
   }
@@ -662,7 +705,7 @@ function App({ onExit }: { onExit: () => void }) {
   function replaceInEditor(range: Monaco.IRange, text: string, selectionStart = text.length, selectionEnd = selectionStart, extra?: { offset: number; text: string }) {
     const editor = editorRef.current
     const model = editor?.getModel()
-    if (!editor || !model) throw new Error('编辑器尚未就绪')
+    if (!editor || !model) throw new Error(t("编辑器尚未就绪"))
     const start = model.getOffsetAt({ lineNumber: range.startLineNumber, column: range.startColumn })
     const edits: Monaco.editor.IIdentifiedSingleEditOperation[] = [{ range, text, forceMoveMarkers: true }]
     if (extra) {
@@ -683,7 +726,7 @@ function App({ onExit }: { onExit: () => void }) {
     const editor = editorRef.current
     const model = editor?.getModel()
     const range = editor?.getSelection()
-    if (!editor || !model || !range) throw new Error('请先打开文本文件')
+    if (!editor || !model || !range) throw new Error(t("请先打开文本文件"))
     return { editor, model, range, text: model.getValueInRange(range) }
   }
 
@@ -694,9 +737,9 @@ function App({ onExit }: { onExit: () => void }) {
   }
 
   async function insertHighlight() {
-    if (!project) throw new Error('请先打开项目')
+    if (!project) throw new Error(t("请先打开项目"))
     const { range, text, model } = selectedRange()
-    const body = text || '高亮文字'
+    const body = text || t("高亮文字")
     const multiline = /\r?\n/.test(body)
     const markup = multiline
       ? `\\noindent\\colorbox{${highlightColor}}{%\n\\parbox{\\dimexpr\\linewidth-2\\fboxsep\\relax}{%\n${body}%\n}%\n}`
@@ -707,7 +750,7 @@ function App({ onExit }: { onExit: () => void }) {
       const source = model.getValue()
       if (!packagePresent(source)) {
         const offset = source.indexOf('\\begin{document}')
-        if (offset < 0) throw new Error('主文件没有 \\begin{document}')
+        if (offset < 0) throw new Error(t("主文件没有 \\begin{document}"))
         extra = { offset, text: '\\usepackage{xcolor}\n' }
       }
     } else {
@@ -715,7 +758,7 @@ function App({ onExit }: { onExit: () => void }) {
       const main = await api<{ content: string }>(url)
       if (!packagePresent(main.content)) {
         const offset = main.content.indexOf('\\begin{document}')
-        if (offset < 0) throw new Error('主文件没有 \\begin{document}')
+        if (offset < 0) throw new Error(t("主文件没有 \\begin{document}"))
         await api(url, json('PUT', { content: `${main.content.slice(0, offset)}\\usepackage{xcolor}\n${main.content.slice(offset)}` }))
       }
     }
@@ -724,7 +767,7 @@ function App({ onExit }: { onExit: () => void }) {
 
   function changeHeading(level: number) {
     const { model, range } = selectedRange()
-    if (range.startLineNumber !== range.endLineNumber) throw new Error('标题格式一次只能应用于一行')
+    if (range.startLineNumber !== range.endLineNumber) throw new Error(t("标题格式一次只能应用于一行"))
     const line = range.startLineNumber
     const source = model.getLineContent(line)
     const replacement = headingLine(source, level)
@@ -756,7 +799,7 @@ function App({ onExit }: { onExit: () => void }) {
   }
 
   async function insertFromDialog(text: string, requiredPackage?: 'graphicx' | 'hyperref' | 'amsmath') {
-    if (!project || !pendingSelection.current || pendingSelection.current.path !== activePath) throw new Error('插入位置已变化，请重新操作')
+    if (!project || !pendingSelection.current || pendingSelection.current.path !== activePath) throw new Error(t("插入位置已变化，请重新操作"))
     const { model } = selectedRange()
     let extra: { offset: number; text: string } | undefined
     if (requiredPackage) {
@@ -765,7 +808,7 @@ function App({ onExit }: { onExit: () => void }) {
         const source = model.getValue()
         if (!hasPackage(source)) {
           const offset = source.indexOf('\\begin{document}')
-          if (offset < 0) throw new Error('主文件没有 \\begin{document}，请先配置导言区')
+          if (offset < 0) throw new Error(t("主文件没有 \\begin{document}，请先配置导言区"))
           extra = { offset, text: `\\usepackage{${requiredPackage}}\n` }
         }
       } else {
@@ -773,7 +816,7 @@ function App({ onExit }: { onExit: () => void }) {
         const data = await api<{ content: string }>(mainUrl)
         if (!hasPackage(data.content)) {
           const offset = data.content.indexOf('\\begin{document}')
-          if (offset < 0) throw new Error('主文件没有 \\begin{document}，请先配置导言区')
+          if (offset < 0) throw new Error(t("主文件没有 \\begin{document}，请先配置导言区"))
           await api(mainUrl, json('PUT', { content: `${data.content.slice(0, offset)}\\usepackage{${requiredPackage}}\n${data.content.slice(offset)}` }))
         }
       }
@@ -784,7 +827,7 @@ function App({ onExit }: { onExit: () => void }) {
   }
 
   async function uploadInsertImage(file: File): Promise<string> {
-    if (!project) throw new Error('请先打开项目')
+    if (!project) throw new Error(t("请先打开项目"))
     const path = newAssetPath(file.name)
     const form = new FormData(); form.append('file', file)
     await api(`/api/projects/${project.id}/upload?path=${encodeURIComponent(path)}`, { method: 'POST', body: form })
@@ -793,21 +836,21 @@ function App({ onExit }: { onExit: () => void }) {
   }
 
   async function copyInsertImage(sourceProjectId: string, sourcePath: string): Promise<string> {
-    if (!project) throw new Error('请先打开项目')
+    if (!project) throw new Error(t("请先打开项目"))
     const result = await api<{ path: string }>(`/api/projects/${project.id}/copy-image`, json('POST', { sourceProjectId, sourcePath }))
     await refreshFiles(project.id)
     return result.path
   }
 
   async function importInsertImageUrl(url: string): Promise<string> {
-    if (!project) throw new Error('请先打开项目')
+    if (!project) throw new Error(t("请先打开项目"))
     const result = await api<{ path: string }>(`/api/projects/${project.id}/import-image-url`, json('POST', { url }))
     await refreshFiles(project.id)
     return result.path
   }
 
   async function readProjectSources(): Promise<Map<string, string>> {
-    if (!project) throw new Error('请先打开项目')
+    if (!project) throw new Error(t("请先打开项目"))
     const candidates = files.filter(file => file.type === 'file' && isSearchableFile(file.path) && (file.size ?? 0) <= 2 * 1024 * 1024).slice(0, 200)
     const results = await Promise.allSettled(candidates.map(async file => ({ path: file.path, content: (await api<{ content: string }>(`/api/projects/${project.id}/file?path=${encodeURIComponent(file.path)}`)).content })))
     return new Map(results.filter((result): result is PromiseFulfilledResult<{ path: string; content: string }> => result.status === 'fulfilled').map(result => [result.value.path, result.value.content]))
@@ -817,7 +860,7 @@ function App({ onExit }: { onExit: () => void }) {
     if (!project) return
     setSearchBusy(true); setSearchError('')
     try {
-      if (!(await saveCurrent(false))) throw new Error('当前文件保存失败，搜索已取消')
+      if (!(await saveCurrent(false))) throw new Error(t("当前文件保存失败，搜索已取消"))
       setSearchHits(searchSources(await readProjectSources(), options))
     } catch (error) { setSearchError(error instanceof Error ? error.message : String(error)) }
     finally { setSearchBusy(false) }
@@ -825,10 +868,10 @@ function App({ onExit }: { onExit: () => void }) {
 
   async function replaceAllInProject(replacement: string, options: SearchOptions) {
     if (!project || !searchHits.length) return
-    if (!window.confirm(`将替换项目中匹配的内容（当前显示 ${searchHits.length} 处），继续吗？`)) return
+    if (!window.confirm(t("将替换项目中匹配的内容（当前显示 {0} 处），继续吗？", searchHits.length))) return
     setSearchBusy(true); setSearchError('')
     try {
-      if (!(await saveCurrent(false))) throw new Error('当前文件保存失败，替换已取消')
+      if (!(await saveCurrent(false))) throw new Error(t("当前文件保存失败，替换已取消"))
       const sources = await readProjectSources()
       let changed = 0
       for (const [file, source] of sources) {
@@ -840,7 +883,7 @@ function App({ onExit }: { onExit: () => void }) {
       }
       await refreshFiles(project.id)
       setSearchHits(searchSources(await readProjectSources(), options))
-      setNotice(`已替换 ${changed} 处内容`); setTimeout(() => setNotice(''), 5500)
+      setNotice(t("已替换 {0} 处内容", changed)); setTimeout(() => setNotice(''), 5500)
     } catch (error) { setSearchError(error instanceof Error ? error.message : String(error)) }
     finally { setSearchBusy(false) }
   }
@@ -853,15 +896,42 @@ function App({ onExit }: { onExit: () => void }) {
       const model = editor?.getModel()
       if (editorMode === 'visual' && file.endsWith('.tex') && model) {
         const offset = model.getOffsetAt({ lineNumber: Math.min(line, model.getLineCount()), column })
-        visualSelectionRef.current = { start: offset, end: offset }
-        visualViewportOffsetRef.current = offset
-        setVisualTarget({ offset, serial: ++visualTargetSerialRef.current })
+        revealVisualOffset(offset)
       } else {
         editor?.revealLineInCenter(line)
         editor?.setPosition({ lineNumber: line, column })
         editor?.focus()
       }
     }, 80)
+  }
+
+  function revealVisualOffset(offset: number) {
+    visualSelectionRef.current = { start: offset, end: offset }
+    visualViewportOffsetRef.current = offset
+    setVisualTarget({ offset, serial: ++visualTargetSerialRef.current })
+  }
+
+  async function navigateVisualReference(kind: 'reference' | 'citation', key: string) {
+    if (!project) return
+    const target = (kind === 'reference' ? references : citations).find(item => item.value === key)
+    if (!target) { showError(t("未找到“{0}”的定义", key)); return }
+
+    let offset = target.offset
+    let showSource = kind === 'citation'
+    if (target.file !== activePath) {
+      const opened = await openFile(project.id, target.file)
+      if (opened === undefined || projectIdRef.current !== project.id) return
+      const index = buildReferenceIndex([{ file: target.file, source: opened }])
+      const updated = (kind === 'reference' ? index.references : index.citations).find(item => item.value === key)
+      if (!updated) { showError(t("未找到“{0}”的定义", key)); return }
+      offset = updated.offset
+      if (!showSource) showSource = !parseVisualLatex(opened).documentFound
+    }
+
+    if (showSource) {
+      pendingCodeRestoreRef.current = offset
+      if (target.file.endsWith('.tex')) setEditorMode('code')
+    } else revealVisualOffset(offset)
   }
 
   async function currentSyncPoints(): Promise<SyncPoint[]> {
@@ -874,10 +944,10 @@ function App({ onExit }: { onExit: () => void }) {
     const model = editorRef.current?.getModel()
     const visualOffset = visualSelectionRef.current?.start ?? visualViewportOffsetRef.current
     const line = editorMode === 'visual' && model ? model.getPositionAt(Math.min(visualOffset, model.getValueLength())).lineNumber : editorRef.current?.getPosition()?.lineNumber
-    if (!line || !activePath.endsWith('.tex')) { showError('请先在 LaTeX 源码中放置光标'); return }
+    if (!line || !activePath.endsWith('.tex')) { showError(t("请先在 LaTeX 源码中放置光标")); return }
     try {
       const matches = (await currentSyncPoints()).filter(point => point.file === activePath)
-      if (!matches.length) throw new Error('当前 PDF 没有该文件的定位数据，请重新编译')
+      if (!matches.length) throw new Error(t("当前 PDF 没有该文件的定位数据，请重新编译"))
       const point = matches.reduce((best, item) => Math.abs(item.line - line) < Math.abs(best.line - line) ? item : best)
       if (layout === 'editor') chooseLayout('split')
       setPdfTarget({ page: point.page, x: point.x, y: point.y, serial: Date.now() })
@@ -887,7 +957,7 @@ function App({ onExit }: { onExit: () => void }) {
   async function syncPdfToSource(page: number, x: number, y: number) {
     try {
       const matches = (await currentSyncPoints()).filter(point => point.page === page)
-      if (!matches.length) throw new Error('当前 PDF 没有定位数据，请重新编译')
+      if (!matches.length) throw new Error(t("当前 PDF 没有定位数据，请重新编译"))
       const point = matches.reduce((best, item) => {
         const score = (value: SyncPoint) => Math.abs(value.y - y) * 4 + Math.abs(value.x - x) * .15 + (value.kind === 'box' ? 2 : 0)
         return score(item) < score(best) ? item : best
@@ -901,7 +971,7 @@ function App({ onExit }: { onExit: () => void }) {
     try {
       if (editorMode === 'visual' && !restoreVisualSelection(true)) return
       const { model, range, text } = selectedRange()
-      if (type === 'suggestion' && !text) throw new Error('请先选中需要修改的源码')
+      if (type === 'suggestion' && !text) throw new Error(t("请先选中需要修改的源码"))
       setReviewDraft({ type, file: activePath, line: range.startLineNumber, column: range.startColumn, offset: model.getOffsetAt(range.getStartPosition()), original: text })
     } catch (error) { showError(error) }
   }
@@ -915,8 +985,8 @@ function App({ onExit }: { onExit: () => void }) {
   }
 
   async function compileVisualCard(block: VisualBlock): Promise<string> {
-    if (!project) throw new Error('请先打开项目')
-    if (!(await saveCurrent(false))) throw new Error('保存失败，无法编译卡片')
+    if (!project) throw new Error(t("请先打开项目"))
+    if (!(await saveCurrent(false))) throw new Error(t("保存失败，无法编译卡片"))
     const result = await api<{ url: string }>(`/api/projects/${project.id}/card-preview`, json('POST', { file: activePath, start: block.start, end: block.end, expected: block.raw }))
     return result.url
   }
@@ -943,8 +1013,8 @@ function App({ onExit }: { onExit: () => void }) {
   }
 
   async function submitReview(body: string, proposed: string) {
-    if (!project || !reviewDraft) throw new Error('没有待保存的审阅内容')
-    if (!(await saveCurrent(false))) throw new Error('当前文件保存失败，审阅内容未提交')
+    if (!project || !reviewDraft) throw new Error(t("没有待保存的审阅内容"))
+    if (!(await saveCurrent(false))) throw new Error(t("当前文件保存失败，审阅内容未提交"))
     await api(`/api/projects/${project.id}/review`, json('POST', { ...reviewDraft, body, proposed: reviewDraft.type === 'suggestion' ? proposed : undefined }))
     setReviewThreads(await api<ReviewThread[]>(`/api/projects/${project.id}/review`))
     setActivePanel('review'); setShowSidebar(true)
@@ -975,8 +1045,17 @@ function App({ onExit }: { onExit: () => void }) {
     } catch (error) { showError(error) }
   }
 
+  async function deleteProjectSnapshot(item: Snapshot) {
+    if (!project || !window.confirm(t("删除快照「{0}」？此操作无法撤销。", t(item.note)))) return
+    const projectId = project.id
+    try {
+      await api('/api/projects/' + projectId + '/history/' + encodeURIComponent(item.id), { method: 'DELETE' })
+      if (projectIdRef.current === projectId) setSnapshots(items => items.filter(snapshot => snapshot.id !== item.id))
+    } catch (error) { showError(error) }
+  }
+
   async function restoreProjectSnapshot(id: string) {
-    if (!project || !window.confirm('恢复快照会替换当前项目文件，并自动创建恢复前备份。确定继续吗？')) return
+    if (!project || !window.confirm(t("恢复快照会替换当前项目文件，并自动创建恢复前备份。确定继续吗？"))) return
     try {
       if (!(await saveCurrent(false))) return
       await api(`/api/projects/${project.id}/history/${id}/restore`, { method: 'POST' })
@@ -985,20 +1064,20 @@ function App({ onExit }: { onExit: () => void }) {
       const target = nextFiles.some(file => file.path === activePath) ? activePath : project.mainFile
       const data = await api<{ content: string }>(`/api/projects/${project.id}/file?path=${encodeURIComponent(target)}`)
       setActivePath(target); setContent(data.content); setSavedContent(data.content)
-      setNotice('快照已恢复，请重新编译 PDF'); setTimeout(() => setNotice(''), 5500)
+      setNotice(t("快照已恢复，请重新编译 PDF")); setTimeout(() => setNotice(''), 5500)
     } catch (error) { showError(error) }
   }
 
   async function gitAction(action: 'init' | 'commit' | 'remote' | 'push' | 'pull', payload?: { message?: string; name?: string; email?: string; url?: string }): Promise<boolean> {
     if (!project) return false
     const sync = action === 'push' || action === 'pull'
-    if (sync) setGitFeedback({ action, status: 'running', message: action === 'push' ? '正在推送已提交的内容…' : '正在拉取远程内容…' })
+    if (sync) setGitFeedback({ action, status: 'running', message: action === 'push' ? t("正在推送已提交的内容…") : t("正在拉取远程内容…") })
     else if (action === 'remote') setGitFeedback(null)
     try {
-      if ((action === 'commit' || action === 'pull') && !(await saveCurrent(false))) throw new Error('当前文件保存失败，Git 操作已取消')
+      if ((action === 'commit' || action === 'pull') && !(await saveCurrent(false))) throw new Error(t("当前文件保存失败，Git 操作已取消"))
       const body = action === 'init' ? undefined : action === 'remote' ? { url: payload?.url } : action === 'commit' ? payload : { action }
       const result = await api<{ reviewError?: string; project?: Project }>(`/api/projects/${project.id}/git/${action === 'push' || action === 'pull' ? 'sync' : action}`, body ? json('POST', body) : { method: 'POST' })
-      if (sync) setGitFeedback({ action, status: result.reviewError ? 'error' : 'success', message: result.reviewError ? `源码${action === 'push' ? '推送' : '拉取'}成功；审阅同步失败：${result.reviewError}` : action === 'push' ? '推送成功：源码与审阅记录已同步' : '拉取成功：源码与审阅记录已同步' })
+      if (sync) setGitFeedback({ action, status: result.reviewError ? 'error' : 'success', message: result.reviewError ? t("源码{0}成功；审阅同步失败：{1}", action === 'push' ? t("推送") : t("拉取"), result.reviewError) : action === 'push' ? t("推送成功：源码与审阅记录已同步") : t("拉取成功：源码与审阅记录已同步") })
       try { setGitState(await api<GitState>(`/api/projects/${project.id}/git`)) }
       catch (error) { showError(error); if (!sync) return false }
       if (sync) setReviewThreads(await api<ReviewThread[]>(`/api/projects/${project.id}/review`))
@@ -1014,7 +1093,7 @@ function App({ onExit }: { onExit: () => void }) {
       return true
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      if (sync) setGitFeedback({ action, status: 'error', message: `${action === 'push' ? '推送失败' : '拉取失败'}：${message}` })
+      if (sync) setGitFeedback({ action, status: 'error', message: `${action === 'push' ? t("推送失败") : t("拉取失败")}：${message}` })
       showError(error)
       return false
     }
@@ -1047,23 +1126,23 @@ function App({ onExit }: { onExit: () => void }) {
   async function saveAiSettings(settings: AiSettingsInput) {
     try {
       setAiSettings(await api<AiSettingsView>('/api/ai/settings', json('PUT', settings)))
-      setNotice('AI 设置已保存'); setTimeout(() => setNotice(''), 5500)
+      setNotice(t("AI 设置已保存")); setTimeout(() => setNotice(''), 5500)
     } catch (error) { showError(error) }
   }
 
   async function requestAi(mode: string, prompt: string, imageDataUrl?: string, selectionOverride?: Monaco.Selection) {
     if (!project) return
-    if (!aiSettings.configured) { setActivePanel('settings'); setAiError('请先配置 AI API Key'); return }
+    if (!aiSettings.configured) { setActivePanel('settings'); setAiError(t("请先配置 AI API Key")); return }
     if (!selectionOverride && editorMode === 'visual') restoreVisualSelection(false)
     const editor = editorRef.current
     const model = editor?.getModel()
     const selection = selectionOverride ?? editor?.getSelection()
     const selected = model && selection ? model.getValueInRange(selection) : ''
-    if (['translate', 'polish', 'rewrite'].includes(mode) && !selected.trim()) { setAiError('请先在编辑器中选中需要处理的源码'); setActivePanel('ai'); return }
-    if (['rewrite', 'formula', 'table', 'custom'].includes(mode) && !prompt.trim()) { setAiError('请先填写具体要求'); setActivePanel('ai'); return }
+    if (['translate', 'polish', 'rewrite'].includes(mode) && !selected.trim()) { setAiError(t("请先在编辑器中选中需要处理的源码")); setActivePanel('ai'); return }
+    if (['rewrite', 'formula', 'table', 'custom'].includes(mode) && !prompt.trim()) { setAiError(t("请先填写具体要求")); setActivePanel('ai'); return }
     if (mode === 'chat' && !prompt.trim()) return
     const context = mode === 'explain' ? (job?.log ?? '').slice(-12000) : ''
-    if (mode === 'explain' && !context && !selected && !prompt.trim()) { setAiError('请先编译或选中需要解释的内容'); setActivePanel('ai'); return }
+    if (mode === 'explain' && !context && !selected && !prompt.trim()) { setAiError(t("请先编译或选中需要解释的内容")); setActivePanel('ai'); return }
     setActivePanel('ai'); setShowSidebar(true); setAiError(''); setAiBusy(true)
     aiTarget.current = selection ? { path: activePath, selection, original: selected } : null
     setAiOutput({ mode, text: '', selectedText: selected, path: activePath })
@@ -1071,8 +1150,8 @@ function App({ onExit }: { onExit: () => void }) {
     aiController.current = controller
     try {
       const response = await fetch('/api/ai/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode, prompt, selectedText: selected, context, imageDataUrl }), signal: controller.signal })
-      if (!response.ok) { const data = await response.json().catch(() => ({})) as { error?: string }; throw new Error(data.error || `AI 请求失败（${response.status}）`) }
-      if (!response.body) throw new Error('AI 响应为空')
+      if (!response.ok) { const data = await response.json().catch(() => ({})) as { error?: string }; throw new Error(data.error || t("AI 请求失败（{0}）", response.status)) }
+      if (!response.body) throw new Error(t("AI 响应为空"))
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
@@ -1099,22 +1178,22 @@ function App({ onExit }: { onExit: () => void }) {
   async function recognizeTableImage(file: File) {
     try {
       const selection = pendingSelection.current?.selection
-      if (!['image/png', 'image/jpeg'].includes(file.type) || file.size > 8 * 1024 * 1024) throw new Error('请选择 8 MB 以内的 PNG 或 JPEG 图片')
+      if (!['image/png', 'image/jpeg'].includes(file.type) || file.size > 8 * 1024 * 1024) throw new Error(t("请选择 8 MB 以内的 PNG 或 JPEG 图片"))
       const dataUrl = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader()
         reader.onload = () => resolve(String(reader.result))
-        reader.onerror = () => reject(new Error('无法读取图片'))
+        reader.onerror = () => reject(new Error(t("无法读取图片")))
         reader.readAsDataURL(file)
       })
-      await requestAi('table', '将图片中的表格转换为 LaTeX 表格', dataUrl, selection)
+      await requestAi('table', t("将图片中的表格转换为 LaTeX 表格"), dataUrl, selection)
     } catch (error) { showError(error) }
   }
 
   function applyAiResult() {
-    if (!aiOutput?.text || !aiTarget.current || aiTarget.current.path !== activePath) { showError('编辑位置已变化，请重新发起 AI 请求'); return }
+    if (!aiOutput?.text || !aiTarget.current || aiTarget.current.path !== activePath) { showError(t("编辑位置已变化，请重新发起 AI 请求")); return }
     try {
       const { model } = selectedRange()
-      if (model.getValueInRange(aiTarget.current.selection) !== aiTarget.current.original) throw new Error('选中内容已改变，请重新发起 AI 请求')
+      if (model.getValueInRange(aiTarget.current.selection) !== aiTarget.current.original) throw new Error(t("选中内容已改变，请重新发起 AI 请求"))
       let text = aiOutput.text.trim().replace(/^```(?:latex|tex)?\s*\n?/, '').replace(/\n?```$/, '')
       if (aiOutput.mode === 'formula' && !/^\\\(|^\\\[|^\$/.test(text)) text = `\\(${text}\\)`
       replaceInEditor(aiTarget.current.selection, text)
@@ -1127,10 +1206,10 @@ function App({ onExit }: { onExit: () => void }) {
     if (!editor) return false
     if (command === 'undo' || command === 'redo') { editor.trigger('openleaf', command, null); visualSelectionRef.current = null; if (editorMode !== 'visual') editor.focus(); return true }
     if (command === 'find') { void editor.getAction('actions.find')?.run(); return true }
-    if (!activePath.endsWith('.tex')) throw new Error('该操作仅适用于 .tex 文件')
-    if (command === 'bold') { wrapSelection('\\textbf{', '}', '文本'); return true }
+    if (!activePath.endsWith('.tex')) throw new Error(t("该操作仅适用于 .tex 文件"))
+    if (command === 'bold') { wrapSelection('\\textbf{', '}', t("文本")); return true }
     if (command === 'highlight') { void insertHighlight().catch(showError); return true }
-    if (command === 'italic') { wrapSelection('\\textit{', '}', '文本'); return true }
+    if (command === 'italic') { wrapSelection('\\textit{', '}', t("文本")); return true }
     if (command === 'insert:math') { wrapSelection('\\(', '\\)', 'x'); return true }
     if (command === 'insert:heading') { changeHeading(1); return true }
     if (command === 'insert:list' || command === 'list:0') { insertList(false); return true }
@@ -1152,8 +1231,8 @@ function App({ onExit }: { onExit: () => void }) {
     if (command.startsWith('layout:')) { chooseLayout(command.slice(7) as Layout); return }
     if (command === 'comment' || command === 'suggestion') { openReview(command); return }
     if (command === 'more:0') { setActivePanel('ai'); setShowSidebar(true); return }
-    if (command === 'more:1') { void requestAi('translate', '翻译选中的内容'); return }
-    if (command === 'more:2') { void requestAi('explain', '解释选中的内容或编译错误'); return }
+    if (command === 'more:1') { void requestAi('translate', t("翻译选中的内容")); return }
+    if (command === 'more:2') { void requestAi('explain', t("解释选中的内容或编译错误")); return }
     if (/^(undo|redo|find|bold|highlight|italic|insert:|style:|symbol:|image:|table:|list:)/.test(command)) {
       try { if (runEditorCommand(command)) return } catch (error) { showError(error); return }
     }
@@ -1174,14 +1253,14 @@ function App({ onExit }: { onExit: () => void }) {
       case 'exportZip': if (project) window.location.href = `/api/projects/${project.id}/export`; return
       case 'rename': {
         if (!project) return
-        const name = window.prompt('项目新名称', project.name)
+        const name = window.prompt(t("项目新名称"), project.name)
         if (!name) return
         void api<Project>(`/api/projects/${project.id}`, json('PATCH', { name })).then(next => { setProject(next); void refreshProjects() }).catch(showError)
         return
       }
       case 'setMain': {
         if (!project) return
-        const file = window.prompt('主 .tex 文件路径', project.mainFile)
+        const file = window.prompt(t("主 .tex 文件路径"), project.mainFile)
         if (!file) return
         void api<Project>(`/api/projects/${project.id}`, json('PATCH', { mainFile: file })).then(setProject).catch(showError)
         return
@@ -1189,8 +1268,8 @@ function App({ onExit }: { onExit: () => void }) {
       case 'deleteProject': void deleteProject(); return
       case 'help': window.open('https://tectonic-typesetting.github.io/book/latest/', '_blank', 'noopener'); return
       case 'shortcuts': setShowShortcuts(true); return
-      case 'about': setNotice('TeXloom 0.1 · 本地 LaTeX 工作台'); setTimeout(() => setNotice(''), 5500); return
-      default: setNotice('无法识别此操作'); setTimeout(() => setNotice(''), 5500)
+      case 'about': setNotice(t("TeXloom 0.1 · 本地 LaTeX 工作台")); setTimeout(() => setNotice(''), 5500); return
+      default: setNotice(t("无法识别此操作")); setTimeout(() => setNotice(''), 5500)
     }
   }
 
@@ -1220,7 +1299,7 @@ function App({ onExit }: { onExit: () => void }) {
     const span = visualSelectionRef.current
     const model = editorRef.current?.getModel()
     if (!span || !model || span.end > model.getValueLength()) {
-      if (required) showError('请先在可视化正文中放置光标或选择文字')
+      if (required) showError(t("请先在可视化正文中放置光标或选择文字"))
       return false
     }
     const from = model.getPositionAt(span.start)
@@ -1232,31 +1311,33 @@ function App({ onExit }: { onExit: () => void }) {
   commandRef.current = handleCommand
 
   return <div className={`app-shell ${focusMode ? 'focus-mode' : ''} ${editorMode === 'visual' ? 'visual-workspace' : ''}`}>
-    <header className="topbar"><button className="brand" onClick={() => { if (project) void goHome(); else onExit() }}><span className="brand-mark"><img src="/icon.png" alt="" /></span><span className="brand-name">TeXloom</span></button>{project && <WorkspaceMenuBar onCommand={handleCommand} />}<div className="topbar-right"><div className="workspace-location" ref={workspaceBadgeRef}><button className="local-badge" type="button" aria-expanded={workspaceOpen} onClick={() => { setWorkspaceOpen(value => !value); void refreshWorkspace(project?.id).catch(showError) }}><span className="local-dot" />本地工作空间<ChevronDown size={14} /></button>{workspaceOpen && <div className="workspace-location-menu"><h3>项目存储位置</h3>{project && <><label>当前项目文件夹</label><code>{workspaceInfo?.projectPath || '读取中…'}</code></>}<label>{project ? '当前项目所在根目录' : '当前项目根目录'}</label><code>{project ? workspaceInfo?.projectRoot || '读取中…' : workspaceInfo?.root || '读取中…'}</code>{project && workspaceInfo?.projectRoot !== workspaceInfo?.root && <><label>新项目根目录</label><code>{workspaceInfo?.root}</code></>}<p>更换根目录后，新项目保存在新位置；已有项目仍在原位置。</p><button type="button" onClick={() => { setWorkspaceOpen(false); setRootDialog('change') }}><FolderOpen size={15} />修改根目录</button></div>}</div><a className="top-help" href="https://tectonic-typesetting.github.io/book/latest/" target="_blank" rel="noreferrer"><CircleHelp size={17} />帮助文档</a></div></header>
+    <header className="topbar"><button className="brand" onClick={() => { if (project) void goHome(); else onExit() }}><span className="brand-mark"><img src="/icon.png" alt="" /></span><span className="brand-name">TeXloom</span></button>{project && <WorkspaceMenuBar onCommand={handleCommand} />}<div className="topbar-right">{!project && <LanguageToggle />}<div className="workspace-location" ref={workspaceBadgeRef}><button className="local-badge" type="button" aria-expanded={workspaceOpen} onClick={() => { setWorkspaceOpen(value => !value); void refreshWorkspace(project?.id).catch(showError) }}><span className="local-dot" />{t("本地工作空间")}<ChevronDown size={14} /></button>{workspaceOpen && <div className="workspace-location-menu"><h3>{t("项目存储位置")}</h3>{project && <><label>{t("当前项目文件夹")}</label><code>{workspaceInfo?.projectPath || t("读取中…")}</code></>}<label>{project ? t("当前项目所在根目录") : t("当前项目根目录")}</label><code>{project ? workspaceInfo?.projectRoot || t("读取中…") : workspaceInfo?.root || t("读取中…")}</code>{project && workspaceInfo?.projectRoot !== workspaceInfo?.root && <><label>{t("新项目根目录")}</label><code>{workspaceInfo?.root}</code></>}<p>{t("更换根目录后，新项目保存在新位置；已有项目仍在原位置。")}</p><button type="button" onClick={() => { setWorkspaceOpen(false); setRootDialog('change') }}><FolderOpen size={15} />{t("修改根目录")}</button></div>}</div><a className="top-help" href="https://tectonic-typesetting.github.io/book/latest/" target="_blank" rel="noreferrer"><CircleHelp size={17} />{t("帮助文档")}</a></div></header>
     {project ? <div className="workspace">
-      {showSidebar && <><div className="sidebar-shell" style={{ width: activePanel ? sidebarWidth : 48 }}><WorkspaceSidebar project={project} files={files} activePath={activePath} activePanel={activePanel} outline={outline} activeOutlineLine={visualLine} searchHits={searchHits} searchBusy={searchBusy} searchError={searchError} reviewThreads={reviewThreads} snapshots={snapshots} gitState={gitState} gitFeedback={gitFeedback} aiSettings={aiSettings} aiOutput={aiOutput} aiBusy={aiBusy} aiError={aiError} editorFontSize={editorFontSize} editorWrap={editorWrap} autoCompile={autoCompile} appearance={appearance} highlightColor={highlightColor} onHighlightColor={changeHighlightColor} onPanelChange={setActivePanel} onCommand={handleCommand} onOpenFile={file => void openFile(project.id, file)} onDeleteFile={file => void deleteFile(file)} onNavigate={(file, line, column) => void navigateTo(file, line, column)} onSearch={options => void searchProject(options)} onReplaceAll={(replacement, options) => void replaceAllInProject(replacement, options)} onAddReview={openReview} onReviewAction={(id, action, body) => void reviewAction(id, action, body)} onCreateSnapshot={note => void createProjectSnapshot(note)} onRestoreSnapshot={id => void restoreProjectSnapshot(id)} onGitAction={gitAction} onGitBranchChange={changeGitBranch} onReviewReload={reloadReview} onAiRequest={(mode, prompt) => void requestAi(mode, prompt)} onAiApply={() => setAiDiffOpen(true)} onAiCancel={() => aiController.current?.abort()} onSaveAiSettings={settings => void saveAiSettings(settings)} onEditorPreferences={changeEditorPreferences} onAutoCompile={changeAutoCompile} onAppearanceChange={changeAppearance} onPackageEnsureSaved={() => saveCurrent(false)} onPackageSelectedText={() => { const editor = editorRef.current; const selection = editor?.getSelection(); return editor && selection ? editor.getModel()?.getValueInRange(selection) ?? '' : '' }} onPackageApplied={(file, source) => { if (file === activePath) { setContent(source); setSavedContent(source) } void refreshProjects() }} onAgentGetSelection={agentSourceSelection} onAgentBeforeRun={agentBeforeRun} onAgentApplied={agentApplied} /></div>{activePanel && <div className="sidebar-width-resizer" role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" tabIndex={0} onPointerDown={event => { dragStart.current = { x: event.clientX, y: event.clientY, size: sidebarWidth }; event.currentTarget.setPointerCapture(event.pointerId) }} onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) updateSidebarWidth(event.clientX) }} onPointerUp={event => { dragStart.current = null; event.currentTarget.releasePointerCapture(event.pointerId) }} onKeyDown={event => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { const value = Math.max(230, Math.min(500, sidebarWidth + (event.key === 'ArrowLeft' ? -12 : 12))); setSidebarWidth(value); localStorage.setItem('texloom:sidebar-width', String(value)) } }} />}</>}
-      <main className="work-main"><div className="workspace-toolbar"><div className="crumbs">{!showSidebar && <button className="icon-button" onClick={() => setShowSidebar(true)} title="展开侧边栏"><PanelLeftOpen size={18} /></button>}<span>{project.name}</span><ChevronRight size={15} /><strong>{activePath || project.mainFile}</strong></div><div className="workspace-actions"><LayoutPicker layout={layout} onChoose={chooseLayout} onOpenTab={openPdfTab} /><span className="save-state">{saving ? <><LoaderCircle size={14} className="spin" />保存中</> : dirty ? <><span className="unsaved-dot" />未保存</> : <><Save size={14} />已保存</>}</span><button className="soft-button" onClick={() => void saveCurrent()}><Save size={15} />保存</button><button className={`auto-button ${autoCompile ? 'on' : ''}`} onClick={() => changeAutoCompile(!autoCompile)} title={`自动编译：${autoCompile ? '开启' : '关闭'}`} aria-label={`自动编译：${autoCompile ? '开启' : '关闭'}`}><RefreshCw size={16} /></button><button className="soft-button" onClick={() => void compileDraft()} disabled={busy || !tectonicReady} title="未勾选的图表在草稿 PDF 中显示占位框">草稿编译</button><button className="primary-button" onClick={() => void compile()} disabled={busy || !tectonicReady}>{busy ? <LoaderCircle size={16} className="spin" /> : <Play size={16} fill="currentColor" />}{busy ? '编译中' : '编译 PDF'}</button></div></div><div ref={splitRef} className={`editor-preview layout-${layout}`} style={{ '--editor-percent': `${splitPercent}%` } as React.CSSProperties}><section className="editor-pane"><div className="pane-title"><div className="pane-title-label"><Code2 size={17} /><strong>源文件</strong><span className="pane-subtitle">{activePath}</span></div><div className="editor-mode-switch" role="tablist" aria-label="编辑模式"><button type="button" role="tab" aria-selected={editorMode === 'code'} className={editorMode === 'code' ? 'active' : ''} onClick={() => changeMode('code')}>Code</button><button type="button" role="tab" aria-selected={editorMode === 'visual'} className={editorMode === 'visual' ? 'active' : ''} disabled={!activePath.endsWith('.tex')} onClick={() => changeMode('visual')}>Visual</button></div><button type="button" className={`focus-toggle ${focusMode ? 'active' : ''}`} aria-label={focusMode ? '退出专注模式' : '开启专注模式'} title={focusMode ? '退出专注模式（Esc）' : '开启专注模式'} onClick={toggleFocusMode}>{focusMode ? <><Minimize2 size={14} />退出专注 <kbd>Esc</kbd></> : <><Maximize2 size={14} />专注</>}</button></div><EditorToolbar onCommand={handleVisualToolbarCommand} /><div className="editor-wrap" style={{ display: editorMode === 'visual' && activePath.endsWith('.tex') ? 'none' : undefined }}><Editor path={activePath} language={activePath.endsWith('.tex') ? latexLanguageId : 'plaintext'} value={content} onChange={value => setContent(value ?? '')} beforeMount={beforeEditorMount} onMount={onEditorMount} theme={latexThemeName(appearance.theme)} options={{ fontSize: Math.round(editorFontSize * appearance.size / 14), lineHeight: Math.round(24 * appearance.size / 14), minimap: { enabled: false }, wordWrap: editorWrap, automaticLayout: true, scrollBeyondLastLine: false, padding: { top: 18 }, fontFamily: fontFamilies[appearance.font], renderLineHighlight: 'line', lineNumbersMinChars: 3 }} /></div>{editorMode === 'visual' && activePath.endsWith('.tex') && <VisualEditor source={content} projectId={project.id} file={activePath} draftCards={draftCards} onToggleDraft={toggleDraftCard} assetPath={resolveVisualAsset} onCompileCard={compileVisualCard} onReviewCard={reviewVisualCard} onEdit={editVisualSpan} onUndo={() => editorRef.current?.trigger('visual', 'undo', null)} onRedo={() => editorRef.current?.trigger('visual', 'redo', null)} onFocus={() => editorRef.current?.pushUndoStop()} onBlur={() => editorRef.current?.pushUndoStop()} onSelection={span => { visualSelectionRef.current = span }} onViewport={offset => { visualViewportOffsetRef.current = offset; const line = editorRef.current?.getModel()?.getPositionAt(offset).lineNumber; if (line) setVisualLine(line) }} target={visualTarget} />}</section><div className="pane-resizer" role="separator" aria-label="调整编辑器与 PDF 宽度" aria-orientation="vertical" aria-valuemin={20} aria-valuemax={80} aria-valuenow={splitPercent} tabIndex={layout === 'split' ? 0 : -1} onPointerDown={resizeSplit} onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) updateSplit(event.clientX) }} onPointerUp={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) { persistSplit(updateSplit(event.clientX)); event.currentTarget.releasePointerCapture(event.pointerId) } }} onKeyDown={event => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); const value = Math.max(20, Math.min(80, splitPercent + (event.key === 'ArrowLeft' ? -2 : 2))); setSplitPercent(value); persistSplit(value) } }} onDoubleClick={() => { setSplitPercent(50); persistSplit(50) }} /><PdfPreview projectId={project.id} version={pdfVersion} mode={pdfMode} target={pdfTarget} onReverse={syncPdfToSource} /></div><div className={`log-panel ${showLogs ? 'open' : ''}`}><button className="log-heading" onClick={() => setShowLogs(!showLogs)}><div><span className={`compile-indicator ${job?.status || ''}`} />编译日志{job && <span className="log-status">{job.status === 'running' ? '正在编译' : job.status === 'success' ? '编译成功' : '编译失败'}</span>}</div><ChevronDown size={16} className={showLogs ? 'flip' : ''} /></button>{showLogs && <pre>{job?.log || (busy ? '正在启动 Tectonic…' : '暂无编译记录')}</pre>}</div></main>
-    </div> : <Dashboard projects={projects} onOpen={item => void openProject(item)} onRefresh={refreshProjects} onCreate={() => void beginNewProject()} onImportZip={() => importRef.current?.click()} onClone={() => { setModal('clone'); setModalValue('') }} />}
+      {showSidebar && <><div className="sidebar-shell" style={{ width: activePanel ? sidebarWidth : 48 }}><WorkspaceSidebar project={project} files={files} activePath={activePath} activePanel={activePanel} outline={outline} activeOutlineLine={visualLine} searchHits={searchHits} searchBusy={searchBusy} searchError={searchError} reviewThreads={reviewThreads} snapshots={snapshots} gitState={gitState} gitFeedback={gitFeedback} aiSettings={aiSettings} aiOutput={aiOutput} aiBusy={aiBusy} aiError={aiError} editorFontSize={editorFontSize} editorWrap={editorWrap} autoCompile={autoCompile} appearance={appearance} highlightColor={highlightColor} onHighlightColor={changeHighlightColor} onPanelChange={setActivePanel} onCommand={handleCommand} onOpenFile={file => void openFile(project.id, file)} onDeleteFile={file => void deleteFile(file)} onNavigate={(file, line, column) => void navigateTo(file, line, column)} onSearch={options => void searchProject(options)} onReplaceAll={(replacement, options) => void replaceAllInProject(replacement, options)} onAddReview={openReview} onReviewAction={(id, action, body) => void reviewAction(id, action, body)} onCreateSnapshot={note => void createProjectSnapshot(note)} onRestoreSnapshot={id => void restoreProjectSnapshot(id)} onDeleteSnapshot={item => void deleteProjectSnapshot(item)} onGitAction={gitAction} onGitBranchChange={changeGitBranch} onReviewReload={reloadReview} onAiRequest={(mode, prompt) => void requestAi(mode, prompt)} onAiApply={() => setAiDiffOpen(true)} onAiCancel={() => aiController.current?.abort()} onSaveAiSettings={settings => void saveAiSettings(settings)} onEditorPreferences={changeEditorPreferences} onAutoCompile={changeAutoCompile} onAppearanceChange={changeAppearance} onPackageEnsureSaved={() => saveCurrent(false)} onPackageSelectedText={() => { const editor = editorRef.current; const selection = editor?.getSelection(); return editor && selection ? editor.getModel()?.getValueInRange(selection) ?? '' : '' }} onPackageApplied={(file, source) => { if (file === activePath) { setContent(source); setSavedContent(source) } void refreshProjects() }} onAgentGetSelection={agentSourceSelection} onAgentBeforeRun={agentBeforeRun} onAgentApplied={agentApplied} /></div>{activePanel && <div className="sidebar-width-resizer" role="separator" aria-label={t("调整侧栏宽度")} aria-orientation="vertical" tabIndex={0} onPointerDown={event => { dragStart.current = { x: event.clientX, y: event.clientY, size: sidebarWidth }; event.currentTarget.setPointerCapture(event.pointerId) }} onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) updateSidebarWidth(event.clientX) }} onPointerUp={event => { dragStart.current = null; event.currentTarget.releasePointerCapture(event.pointerId) }} onKeyDown={event => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { const value = Math.max(230, Math.min(500, sidebarWidth + (event.key === 'ArrowLeft' ? -12 : 12))); setSidebarWidth(value); localStorage.setItem('texloom:sidebar-width', String(value)) } }} />}</>}
+      <main className="work-main"><div className="workspace-toolbar"><div className="crumbs">{!showSidebar && <button className="icon-button" onClick={() => setShowSidebar(true)} title={t("展开侧边栏")}><PanelLeftOpen size={18} /></button>}<span>{project.name}</span><ChevronRight size={15} /><strong>{activePath || project.mainFile}</strong></div><div className="workspace-actions"><LayoutPicker layout={layout} onChoose={chooseLayout} onOpenTab={openPdfTab} /><span className="save-state">{saving ? <><LoaderCircle size={14} className="spin" />{t("保存中")}</> : dirty ? <><span className="unsaved-dot" />{t("未保存")}</> : <><Save size={14} />{t("已保存")}</>}</span><button className="soft-button" onClick={() => void saveCurrent()}><Save size={15} />{t("保存")}</button><button className={`auto-button ${autoCompile ? 'on' : ''}`} onClick={() => changeAutoCompile(!autoCompile)} title={t("自动编译：{0}", autoCompile ? t("开启") : t("关闭"))} aria-label={t("自动编译：{0}", autoCompile ? t("开启") : t("关闭"))}><RefreshCw size={16} /></button><button className="soft-button" onClick={() => void compileDraft()} disabled={busy || !tectonicReady} title={t("未勾选的图表在草稿 PDF 中显示占位框")}>{t("草稿编译")}</button><button className="primary-button" onClick={() => void compile()} disabled={busy || !tectonicReady}>{busy ? <LoaderCircle size={16} className="spin" /> : <Play size={16} fill="currentColor" />}{busy ? t("编译中") : t("编译 PDF")}</button></div></div><div ref={splitRef} className={`editor-preview layout-${layout}`} style={{ '--editor-percent': `${splitPercent}%` } as React.CSSProperties}><section className="editor-pane"><div className="pane-title"><div className="pane-title-label"><Code2 size={17} /><strong>{t("源文件")}</strong><span className="pane-subtitle">{activePath}</span></div><div className="editor-mode-switch" role="tablist" aria-label={t("编辑模式")}><button type="button" role="tab" aria-selected={editorMode === 'code'} className={editorMode === 'code' ? 'active' : ''} onClick={() => changeMode('code')}>Code</button><button type="button" role="tab" aria-selected={editorMode === 'visual'} className={editorMode === 'visual' ? 'active' : ''} disabled={!activePath.endsWith('.tex')} onClick={() => changeMode('visual')}>Visual</button></div><button type="button" className={`focus-toggle ${focusMode ? 'active' : ''}`} aria-label={focusMode ? t("退出专注模式") : t("开启专注模式")} title={focusMode ? t("退出专注模式（Esc）") : t("开启专注模式")} onClick={toggleFocusMode}>{focusMode ? <><Minimize2 size={14} />{t("退出专注") + " "}<kbd>Esc</kbd></> : <><Maximize2 size={14} />{t("专注")}</>}</button></div><EditorToolbar onCommand={handleVisualToolbarCommand} /><div className="editor-wrap" style={{ display: editorMode === 'visual' && activePath.endsWith('.tex') ? 'none' : undefined }}><Editor path={activePath} language={activePath.endsWith('.tex') ? latexLanguageId : 'plaintext'} value={content} onChange={value => setContent(value ?? '')} beforeMount={beforeEditorMount} onMount={onEditorMount} theme={latexThemeName(appearance.theme)} options={{ fontSize: Math.round(editorFontSize * appearance.size / 14), lineHeight: Math.round(24 * appearance.size / 14), minimap: { enabled: false }, wordWrap: editorWrap, automaticLayout: true, scrollBeyondLastLine: false, padding: { top: 18 }, fontFamily: fontFamilies[appearance.font], renderLineHighlight: 'line', lineNumbersMinChars: 3 }} /></div>{editorMode === 'visual' && activePath.endsWith('.tex') && <VisualEditor source={content} completionContext={completionContext.current} projectId={project.id} file={activePath} draftCards={draftCards} onToggleDraft={toggleDraftCard} assetPath={resolveVisualAsset} onCompileCard={compileVisualCard} onReviewCard={reviewVisualCard} onEdit={editVisualSpan} onUndo={() => editorRef.current?.trigger('visual', 'undo', null)} onRedo={() => editorRef.current?.trigger('visual', 'redo', null)} onShortcut={command => { if (command === 'save') void saveCurrent(); else handleVisualToolbarCommand(command) }} onFocus={() => editorRef.current?.pushUndoStop()} onBlur={() => editorRef.current?.pushUndoStop()} onSelection={span => { visualSelectionRef.current = span }} onViewport={updateVisualViewport} onNavigateReference={(kind, key) => void navigateVisualReference(kind, key)} target={visualTarget} />}</section><div className="pane-resizer" role="separator" aria-label={t("调整编辑器与 PDF 宽度")} aria-orientation="vertical" aria-valuemin={20} aria-valuemax={80} aria-valuenow={splitPercent} tabIndex={layout === 'split' ? 0 : -1} onPointerDown={resizeSplit} onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) updateSplit(event.clientX) }} onPointerUp={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) { persistSplit(updateSplit(event.clientX)); event.currentTarget.releasePointerCapture(event.pointerId) } }} onKeyDown={event => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.preventDefault(); const value = Math.max(20, Math.min(80, splitPercent + (event.key === 'ArrowLeft' ? -2 : 2))); setSplitPercent(value); persistSplit(value) } }} onDoubleClick={() => { setSplitPercent(50); persistSplit(50) }} /><PdfPreview projectId={project.id} version={pdfVersion} mode={pdfMode} target={pdfTarget} onReverse={syncPdfToSource} /></div><div className={`log-panel ${showLogs ? 'open' : ''}`}><button className="log-heading" onClick={() => setShowLogs(!showLogs)}><div><span className={`compile-indicator ${job?.status || ''}`} />{t("编译日志")}{job && <span className="log-status">{job.status === 'running' ? t("正在编译") : job.status === 'success' ? t("编译成功") : t("编译失败")}</span>}</div><ChevronDown size={16} className={showLogs ? 'flip' : ''} /></button>{showLogs && <pre>{job?.log || (busy ? t("正在启动 Tectonic…") : t("暂无编译记录"))}</pre>}</div></main>
+    </div> : <Dashboard theme={appearance.theme} projects={projects} onOpen={item => void openProject(item)} onRefresh={refreshProjects} onCreate={() => void beginNewProject()} onImportZip={() => importRef.current?.click()} onClone={() => { setModal('clone'); setModalValue('') }} />}
 
     <input ref={uploadRef} type="file" hidden onChange={event => { const file = event.target.files?.[0]; if (file) void upload(file); event.target.value = '' }} /><input ref={importRef} type="file" accept=".zip" hidden onChange={event => { const file = event.target.files?.[0]; if (file) void importZip(file); event.target.value = '' }} />
     {rootDialog && workspaceInfo && <WorkspaceRootDialog info={workspaceInfo} firstProject={rootDialog === 'create'} onClose={() => setRootDialog(null)} onConfigured={() => { const action = rootDialog; setRootDialog(null); void refreshWorkspace(project?.id).catch(showError); void refreshProjects().catch(showError); if (action === 'create') { setModal('project'); setModalValue('') } }} />}
     {notice && <div role="alert" className="notice"><CircleHelp size={17} />{notice}<button onClick={() => setNotice('')}><X size={16} /></button></div>}
-    {modal && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setModal(null) }}><form className="modal" onSubmit={event => { event.preventDefault(); void submitModal() }}><div className="modal-icon">{modal === 'project' ? <BookOpen size={23} /> : modal === 'clone' ? <GitBranch size={23} /> : <FilePlus2 size={23} />}</div><h2>{modal === 'project' ? '新建 LaTeX 项目' : modal === 'clone' ? '导入 GitHub 私有仓库' : '新建文件'}</h2><p>{modal === 'project' ? '创建一个新的本地工作空间，开始编写文档。' : modal === 'clone' ? '输入仓库地址。首次连接会打开系统 GitHub 登录，完成后自动导入。' : '输入文件路径，例如 chapter/intro.tex。'}</p><label>{modal === 'project' ? '项目名称' : modal === 'clone' ? 'GitHub 仓库地址' : '文件路径'}<input autoFocus value={modalValue} onChange={event => setModalValue(event.target.value)} placeholder={modal === 'project' ? '例如：研究论文' : modal === 'clone' ? 'https://github.com/owner/private-repo' : '例如：chapter/intro.tex'} /></label><div className="modal-actions"><button type="button" className="outline-button" onClick={() => setModal(null)}>取消</button><button type="submit" className="primary-button" disabled={!modalValue.trim() || modalBusy}>{modalBusy ? '连接中…' : modal === 'clone' ? '连接并导入' : '创建'}</button></div></form></div>}
+    {modal && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setModal(null) }}><form className="modal" onSubmit={event => { event.preventDefault(); void submitModal() }}><div className="modal-icon">{modal === 'project' ? <BookOpen size={23} /> : modal === 'clone' ? <GitBranch size={23} /> : <FilePlus2 size={23} />}</div><h2>{modal === 'project' ? t("新建 LaTeX 项目") : modal === 'clone' ? t("导入 GitHub 私有仓库") : t("新建文件")}</h2><p>{modal === 'project' ? t("创建一个新的本地工作空间，开始编写文档。") : modal === 'clone' ? t("输入仓库地址。首次连接会打开系统 GitHub 登录，完成后自动导入。") : t("输入文件路径，例如 chapter/intro.tex。")}</p><label>{modal === 'project' ? t("项目名称") : modal === 'clone' ? t("GitHub 仓库地址") : t("文件路径")}<input autoFocus value={modalValue} onChange={event => setModalValue(event.target.value)} placeholder={modal === 'project' ? t("例如：研究论文") : modal === 'clone' ? 'https://github.com/owner/private-repo' : t("例如：chapter/intro.tex")} /></label><div className="modal-actions"><button type="button" className="outline-button" onClick={() => setModal(null)}>{t("取消")}</button><button type="submit" className="primary-button" disabled={!modalValue.trim() || modalBusy}>{modalBusy ? t("连接中…") : modal === 'clone' ? t("连接并导入") : t("创建")}</button></div></form></div>}
     {insertDialog && project && <InsertDialog kind={insertDialog.kind} initialSource={insertDialog.source} initialSymbolGroup={insertDialog.symbolGroup} initialTableMode={insertDialog.tableMode} selectedText={selectedText} references={references} citations={citations} imageFiles={files.filter(file => file.type === 'file' && /\.(png|jpe?g|pdf)$/i.test(file.path)).map(file => file.path)} projects={projects} currentProjectId={project.id} onClose={() => { setInsertDialog(null); pendingSelection.current = null }} onInsert={insertFromDialog} onUploadImage={uploadInsertImage} onCopyImage={copyInsertImage} onImportImageUrl={importInsertImageUrl} onListProjectFiles={async id => (await api<FileEntry[]>(`/api/projects/${id}/files`)).filter(file => file.type === 'file' && /\.(png|jpe?g|pdf)$/i.test(file.path)).map(file => file.path)} onImageTableAi={file => void recognizeTableImage(file)} onRefreshReferences={loadInsertIndex} />}
     {reviewDraft && <ReviewDialog draft={reviewDraft} onClose={() => setReviewDraft(null)} onSubmit={submitReview} />}
     {aiDiffOpen && aiOutput && <AiDiffDialog original={aiOutput.selectedText} proposed={aiOutput.text} onClose={() => setAiDiffOpen(false)} onApply={applyAiResult} />}
-    {showShortcuts && <div className="shortcuts-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setShowShortcuts(false) }}><div className="shortcuts-dialog" role="dialog" aria-modal="true" aria-label="快捷键"><h2>快捷键</h2><dl><div><dt>保存文件</dt><dd>Ctrl+S</dd></div><div><dt>撤销</dt><dd>Ctrl+Z</dd></div><div><dt>重做</dt><dd>Ctrl+Y</dd></div><div><dt>加粗</dt><dd>Ctrl+B</dd></div><div><dt>斜体</dt><dd>Ctrl+I</dd></div><div><dt>当前文件查找</dt><dd>Ctrl+F</dd></div><div><dt>源码定位 PDF</dt><dd>Ctrl+Alt+J</dd></div><div><dt>PDF 定位源码</dt><dd>双击 PDF 页面</dd></div></dl><button onClick={() => setShowShortcuts(false)}>关闭</button></div></div>}
+    {showShortcuts && <ShortcutsDialog onClose={() => setShowShortcuts(false)} />}
   </div>
 }
 
 function StandalonePdf({ projectId }: { projectId: string }) {
-  const [name, setName] = useState('PDF 预览')
+  const language = useLanguage()
+  useEffect(() => { document.documentElement.lang = language }, [language])
+  const [name, setName] = useState(t("PDF 预览"))
   const [version] = useState(Date.now)
   useEffect(() => {
     void api<Project>(`/api/projects/${projectId}`).then(project => {
       setName(project.name)
-      document.title = `${project.name} · PDF 预览 · TeXloom`
-    }).catch(() => setName('项目不可用'))
+      document.title = t("{0} · PDF 预览 · TeXloom", project.name)
+    }).catch(() => setName(t("项目不可用")))
   }, [projectId])
   return <div className="standalone-pdf">
     <header className="standalone-header"><span className="standalone-brand"><img src="/icon.png" alt="" />TeXloom</span><span className="standalone-project">{name}</span></header>
@@ -1268,15 +1349,22 @@ const params = new URLSearchParams(window.location.search)
 const pdfProject = params.get('view') === 'pdf' ? params.get('project') : null
 
 function ProductRouter() {
+  const language = useLanguage()
   const [page, setPage] = useState<'landing' | 'workspace'>(() => new URLSearchParams(window.location.search).get('view') === 'workspace' ? 'workspace' : 'landing')
   useEffect(() => {
     const update = () => setPage(new URLSearchParams(window.location.search).get('view') === 'workspace' ? 'workspace' : 'landing')
     window.addEventListener('popstate', update)
     return () => window.removeEventListener('popstate', update)
   }, [])
-  useEffect(() => { document.title = page === 'landing' ? 'TeXloom · 让研究成为主角' : 'TeXloom · 本地 LaTeX 工作台' }, [page])
+  useEffect(() => {
+    document.documentElement.lang = language
+    document.title = page === 'landing' ? t("TeXloom · 让研究成为主角") : t("TeXloom · 本地 LaTeX 工作台")
+  }, [page, language])
   function navigate(next: 'landing' | 'workspace') {
-    window.history.pushState({}, '', next === 'landing' ? '/' : '/?view=workspace')
+    const url = new URL('/', location.href)
+    if (next === 'workspace') url.searchParams.set('view', 'workspace')
+    if (new URLSearchParams(location.search).has('lang')) url.searchParams.set('lang', language)
+    window.history.pushState({}, '', url)
     setPage(next)
     window.scrollTo({ top: 0, behavior: 'instant' })
   }

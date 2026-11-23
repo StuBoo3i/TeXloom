@@ -1,3 +1,4 @@
+import { t } from './i18n'
 import { useEffect, useState } from 'react'
 import { ChevronDown, Link2, LoaderCircle } from 'lucide-react'
 import type { GitFeedback, GitState } from './workspace-ui'
@@ -15,11 +16,11 @@ export function GitRemotePanel({ projectId, state, feedback, onAction }: { proje
 
   const saveRemote = async (): Promise<boolean> => {
     const value = url.trim()
-    if (!value) { setLocalError('请先填写远程仓库地址'); return false }
+    if (!value) { setLocalError(t("请先填写远程仓库地址")); return false }
     setLocalError('')
     const success = await onAction('remote', { url: value })
     if (success) setExpanded(false)
-    else setLocalError('远程地址保存失败，请检查地址后重试')
+    else setLocalError(t("远程地址保存失败，请检查地址后重试"))
     return success
   }
 
@@ -36,10 +37,10 @@ export function GitRemotePanel({ projectId, state, feedback, onAction }: { proje
 
   return <div className="panel-card git-remote-card">
     <Link2 size={22} />
-    <div className="git-remote-heading"><strong>远程仓库</strong>{state.remote && <button type="button" className="git-remote-toggle" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>{expanded ? '收起' : '修改地址'}<ChevronDown size={13} className={expanded ? 'open' : ''} /></button>}</div>
-    <p className="git-remote-current" title={state.remote || undefined}>{state.remote || '尚未配置远程地址'}</p>
-    {expanded && <div className="git-form git-remote-form"><input aria-label="远程仓库地址" value={url} onChange={event => setUrl(event.target.value)} placeholder="HTTPS 或 SSH 地址" disabled={syncBusy} /><button type="button" disabled={syncBusy || !url.trim()} onClick={() => void saveRemote()}>保存地址</button></div>}
-    <div className="git-sync"><button type="button" disabled={syncBusy || !state.remote} onClick={() => void onAction('pull')}>{feedback?.action === 'pull' && feedback.status === 'running' ? <><LoaderCircle size={13} className="spin" />拉取中</> : '拉取'}</button><button type="button" disabled={syncBusy || !state.remote && !url.trim()} onClick={() => void push()}>{feedback?.action === 'push' && feedback.status === 'running' ? <><LoaderCircle size={13} className="spin" />推送中</> : '推送'}</button></div>
+    <div className="git-remote-heading"><strong>{t("远程仓库")}</strong>{state.remote && <button type="button" className="git-remote-toggle" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>{expanded ? t("收起") : t("修改地址")}<ChevronDown size={13} className={expanded ? 'open' : ''} /></button>}</div>
+    <p className="git-remote-current" title={state.remote || undefined}>{state.remote || t("尚未配置远程地址")}</p>
+    {expanded && <div className="git-form git-remote-form"><input aria-label={t("远程仓库地址")} value={url} onChange={event => setUrl(event.target.value)} placeholder={t("HTTPS 或 SSH 地址")} disabled={syncBusy} /><button type="button" disabled={syncBusy || !url.trim()} onClick={() => void saveRemote()}>{t("保存地址")}</button></div>}
+    <div className="git-sync"><button type="button" disabled={syncBusy || !state.remote} onClick={() => void onAction('pull')}>{feedback?.action === 'pull' && feedback.status === 'running' ? <><LoaderCircle size={13} className="spin" />{t("拉取中")}</> : t("拉取")}</button><button type="button" disabled={syncBusy || !state.remote && !url.trim()} onClick={() => void push()}>{feedback?.action === 'push' && feedback.status === 'running' ? <><LoaderCircle size={13} className="spin" />{t("推送中")}</> : t("推送")}</button></div>
     {localError && <p className="git-sync-status error" role="alert">{localError}</p>}
     {feedback && <p className={`git-sync-status ${feedback.status}`} role={feedback.status === 'error' ? 'alert' : 'status'} aria-live="polite">{feedback.status === 'running' && <LoaderCircle size={13} className="spin" />}{feedback.message}</p>}
   </div>
